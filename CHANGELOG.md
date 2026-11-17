@@ -26,3 +26,5 @@ Keep a Changelog and the project uses semantic versioning.
   `jq`); `--repair` and `--arrays` fold their data into the same object rather
   than printing extra lines.
 - Linux setup and usage documentation.
+- Version single-source check test asserting `__version__`, `pyproject.toml`, and the
+  latest `CHANGELOG.md` heading stay identical.
