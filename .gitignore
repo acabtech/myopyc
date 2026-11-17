@@ -1,0 +1,36 @@
+# Local-only upstream checkout (wrapped library, not vendored)
+/upstream/
+
+# Local-only design documents and planning notes
+/plans/
+
+# Recorded sessions / scratch data
+/sessions/
+*.session/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Local env
+.env
+.env.*
