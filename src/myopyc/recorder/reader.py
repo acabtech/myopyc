@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from myopyc.recorder.manifest import read_manifest
+from myopyc.recorder.repair import RepairReport, repair_session
 from myopyc.streams.schema import STREAM_DTYPES, StreamKind
 
 
@@ -125,6 +126,18 @@ class SessionReader:
             "gaps": len(self.manifest.get("gaps", [])),
             "streams": rows,
         }
+
+    def repair(self) -> RepairReport:
+        """Reconcile on-disk chunks with the manifest, then reload it.
+
+        Safe on a clean session (a no-op). Intended for the GUI open path and
+        ``myopyc inspect --repair``; the constructor itself never mutates the
+        session so read-only tooling stays side-effect free unless asked.
+        """
+
+        report = repair_session(self.directory)
+        self.manifest = read_manifest(self.directory)
+        return report
 
 
 def load_session(session_dir: Path | str) -> SessionData:

@@ -13,6 +13,13 @@ Keep a Changelog and the project uses semantic versioning.
 - MAC-to-label device bindings persisted in `~/.config/myopyc/config.toml`.
 - RAM-buffered recorder with time-based `.npy` chunk flushes and JSON manifest.
 - Explicit drop/gap accounting when the RAM budget is exceeded.
+- Crash-safety session repair: `repair_session()` reconciles on-disk chunks with
+  the manifest after an interrupted write — quarantining orphaned or truncated
+  `.npy` files into `unrepaired/` (never deleting them), dropping manifest
+  entries whose files are missing or unreadable, patching sample counts, and
+  moving a stuck `recording` session to a `repaired` status. Idempotent; a
+  `manifest.json.bak` is kept before the first rewrite. Exposed via
+  `SessionReader.repair()` and `myopyc inspect --repair`.
 - Reader API (`SessionReader`, `load_session`) for NumPy/SciPy processing.
 - Headless `record`, `inspect` and `sessions` CLI commands.
 - Linux setup and usage documentation.

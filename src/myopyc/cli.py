@@ -144,6 +144,9 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     from myopyc.recorder.reader import SessionReader
 
     reader = SessionReader(args.session)
+    if args.repair:
+        report = reader.repair()
+        print(json.dumps({"repair": report.as_dict()}, indent=2))
     print(json.dumps(reader.summary(), indent=2))
     if args.arrays:
         data = reader.load()
@@ -187,6 +190,12 @@ def build_parser() -> argparse.ArgumentParser:
     inspect = sub.add_parser("inspect", help="summarise a recorded session")
     inspect.add_argument("session", type=Path)
     inspect.add_argument("--arrays", action="store_true", help="also show array shapes/dtypes")
+    inspect.add_argument(
+        "--repair",
+        action="store_true",
+        help="reconcile chunks against the manifest before inspecting "
+        "(recover a crash-interrupted session)",
+    )
     inspect.set_defaults(func=_cmd_inspect)
 
     sessions = sub.add_parser("sessions", help="list recorded sessions")

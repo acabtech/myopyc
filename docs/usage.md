@@ -54,6 +54,37 @@ myopyc inspect ~/.local/share/myopyc/sessions/20261117_142530_ab12cd
 myopyc inspect <session> --arrays
 ```
 
+## Recovering a crashed session
+
+If the machine loses power or the app is killed mid-recording, a session can be
+left in an inconsistent state: a chunk file written to disk but never registered
+in the manifest, a truncated last chunk, or a status still stuck on `recording`.
+No recorded data through the *last completed flush* is lost, but the directory
+needs reconciling before it reads cleanly:
+
+```bash
+myopyc inspect <session> --repair
+```
+
+`--repair` reconciles the chunk files against `manifest.json`:
+
+- **orphaned** files (on disk, not in the manifest) and **truncated** files
+  (unreadable `.npy`) are moved into an `unrepaired/` folder — never deleted;
+- manifest entries whose files are missing or unreadable are dropped and sample
+  counts patched;
+- a session interrupted mid-recording has its status set to `repaired`;
+- the previous manifest is kept as `manifest.json.bak`.
+
+The operation is idempotent, so it is safe to run again, and a programmatic
+equivalent is available:
+
+```python
+from myopyc.recorder import SessionReader
+
+reader = SessionReader("<session>")
+report = reader.repair()  # report.changed tells you if anything moved
+```
+
 ## Reading data in Python
 
 ```python

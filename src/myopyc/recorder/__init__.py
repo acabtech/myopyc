@@ -9,17 +9,21 @@ from myopyc.recorder.reader import (
     find_sessions,
     load_session,
 )
+from myopyc.recorder.repair import RepairReport, needs_repair, repair_session
 from myopyc.recorder.writer import SessionRecorder, open_recorder
 
 __all__ = [
     "DeviceData",
+    "RepairReport",
     "SessionData",
     "SessionReader",
     "SessionRecorder",
     "StreamData",
     "find_sessions",
     "load_session",
+    "needs_repair",
     "open_recorder",
     "read_manifest",
+    "repair_session",
     "write_manifest",
 ]
