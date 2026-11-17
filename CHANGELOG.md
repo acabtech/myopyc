@@ -22,4 +22,7 @@ Keep a Changelog and the project uses semantic versioning.
   `SessionReader.repair()` and `myopyc inspect --repair`.
 - Reader API (`SessionReader`, `load_session`) for NumPy/SciPy processing.
 - Headless `record`, `inspect` and `sessions` CLI commands.
+- `inspect --json` emits a single machine-readable JSON object (safe to pipe into
+  `jq`); `--repair` and `--arrays` fold their data into the same object rather
+  than printing extra lines.
 - Linux setup and usage documentation.

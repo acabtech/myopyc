@@ -144,6 +144,27 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     from myopyc.recorder.reader import SessionReader
 
     reader = SessionReader(args.session)
+
+    if args.json:
+        # Machine-readable mode: emit exactly one JSON object and suppress all
+        # human/text prints so the output is safe to pipe into jq or a parser.
+        repair_dict = reader.repair().as_dict() if args.repair else None
+        payload = reader.summary()
+        if repair_dict is not None:
+            payload["repair"] = repair_dict
+        if args.arrays:
+            arrays: dict[str, dict[str, object]] = {}
+            data = reader.load()
+            for key, device in data.devices.items():
+                for kind, stream in device.streams.items():
+                    arrays[f"{key}/{kind.value}"] = {
+                        "shape": list(stream.samples.shape),
+                        "dtype": str(stream.samples.dtype),
+                    }
+            payload["arrays"] = arrays
+        print(json.dumps(payload, indent=2))
+        return 0
+
     if args.repair:
         report = reader.repair()
         print(json.dumps({"repair": report.as_dict()}, indent=2))
@@ -190,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
     inspect = sub.add_parser("inspect", help="summarise a recorded session")
     inspect.add_argument("session", type=Path)
     inspect.add_argument("--arrays", action="store_true", help="also show array shapes/dtypes")
+    inspect.add_argument(
+        "--json",
+        action="store_true",
+        help="emit a single machine-readable JSON object (no human text); "
+        "combines with --repair and --arrays into the same object",
+    )
     inspect.add_argument(
         "--repair",
         action="store_true",

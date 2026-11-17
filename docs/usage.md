@@ -54,6 +54,17 @@ myopyc inspect ~/.local/share/myopyc/sessions/20261117_142530_ab12cd
 myopyc inspect <session> --arrays
 ```
 
+For scripting, `--json` prints exactly one machine-readable JSON object with no
+human text, so it is safe to pipe into `jq` or `json.loads`. The `--repair` and
+`--arrays` flags fold their data into the same object (under `repair` and
+`arrays` keys) instead of printing extra lines:
+
+```bash
+myopyc inspect <session> --json
+myopyc inspect <session> --json --arrays | jq '.arrays["left/emg"]'
+myopyc inspect <session> --json --repair | jq '.repair.status_after'
+```
+
 ## Recovering a crashed session
 
 If the machine loses power or the app is killed mid-recording, a session can be
