@@ -1,4 +1,12 @@
-"""Session manifest creation, atomic writes and validation."""
+"""Session manifest creation, atomic writes and validation.
+
+Append-only compatibility contract (``FORMAT_VERSION == 1``): manifests may gain
+new optional top-level fields, per-device/per-stream fields, chunk fields, or
+entirely new stream kinds over time. Readers must ignore keys they do not
+understand and must not require new optional fields to be present; writers must
+only add new optional fields and must never repurpose existing ones. Existing
+sessions remain readable forever by v0.1+ readers as long as this rule holds.
+"""
 
 from __future__ import annotations
 

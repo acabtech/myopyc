@@ -64,7 +64,7 @@ class SessionReader:
 
     def chunks(self, device: str, kind: StreamKind | str) -> list[dict[str, Any]]:
         kind = StreamKind(kind)
-        entry = self.manifest["devices"][device]["streams"][kind.value]
+        entry = self.manifest["devices"][device]["streams"].get(kind.value, {})
         return list(entry.get("chunks", []))
 
     def iter_chunks(self, device: str, kind: StreamKind | str) -> Iterator[NDArray[Any]]:
@@ -87,7 +87,7 @@ class SessionReader:
         for key, entry in self.manifest["devices"].items():
             streams: dict[StreamKind, StreamData] = {}
             for kind in StreamKind:
-                meta = entry["streams"][kind.value]
+                meta = entry.get("streams", {}).get(kind.value, {})
                 streams[kind] = StreamData(
                     kind=kind,
                     samples=self.load_stream(key, kind),
@@ -106,7 +106,7 @@ class SessionReader:
         rows = []
         for key, entry in self.manifest["devices"].items():
             for kind in StreamKind:
-                meta = entry["streams"][kind.value]
+                meta = entry.get("streams", {}).get(kind.value, {})
                 rows.append(
                     {
                         "device": key,

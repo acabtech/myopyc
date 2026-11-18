@@ -96,3 +96,58 @@ def test_find_sessions(tmp_path) -> None:
     found = find_sessions(tmp_path)
     assert found == [recorder.session_dir]
     assert (recorder.session_dir / "manifest.json").is_file()
+
+
+def test_append_only_manifest_fields_ignored(tmp_path) -> None:
+    """Forward-compat: unknown optional fields/stream kinds must not break readers.
+
+    ``FORMAT_VERSION`` stays 1 and evolves by adding optional fields only. A v0.1
+    reader must still load sessions that carry future fields (e.g. markers, an
+    EVENT stream, extra per-chunk metadata) it does not understand.
+    """
+
+    recorder = _recorder(tmp_path)
+    recorder.add(make_emg("left", count=4, start_seq=0, t0=1_000_000_000))
+    recorder.add(make_imu("right", count=2))
+    session_dir = recorder.stop()
+
+    manifest = read_manifest(session_dir)
+    # Optional top-level fields that future writers may add.
+    manifest["markers"] = [{"t_ns": 1_000_000_000, "label": "start"}]
+    manifest["future_flag"] = {"enabled": True}
+    # Extra per-stream field and an entirely unknown stream kind (v0.2 EVENT).
+    left_streams = manifest["devices"]["left"]["streams"]
+    left_streams["emg"]["calibration"] = {"offset": 0}
+    left_streams["event"] = {
+        "chunks": [],
+        "samples": 0,
+        "dropped_samples": 0,
+        "dtype": "future",
+    }
+    # Extra per-chunk metadata.
+    left_streams["emg"]["chunks"][0]["checksum"] = "deadbeef"
+    manifest["gaps"].append({"reason": "future-gap-kind", "extra": 1})
+    (session_dir / "manifest.json").write_text(
+        __import__("json").dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+
+    reader = SessionReader(session_dir)
+    # Unknown keys are preserved on disk and visible via the raw manifest, but the
+    # typed reader continues to understand EMG/IMU exactly as before.
+    assert reader.manifest["markers"][0]["label"] == "start"
+    assert "event" in reader.manifest["devices"]["left"]["streams"]
+
+    data = reader.load()
+    emg = data["left"][StreamKind.EMG].samples
+    assert emg.size == 4
+    assert emg["seq"].tolist() == list(range(4))
+    assert data["right"][StreamKind.IMU].samples.size == 2
+
+    summary = reader.summary()
+    assert summary["status"] == "stopped"
+    kinds = {(row["device"], row["stream"]) for row in summary["streams"]}
+    assert ("left", "emg") in kinds and ("right", "imu") in kinds
+    assert all(row["stream"] in {"emg", "imu"} for row in summary["streams"])
+
+    # A reader path that never asked to mutate the session leaves it intact.
+    assert read_manifest(session_dir)["markers"][0]["label"] == "start"

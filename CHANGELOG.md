@@ -31,3 +31,9 @@ Keep a Changelog and the project uses semantic versioning.
 - Linux setup and usage documentation.
 - Version single-source check test asserting `__version__`, `pyproject.toml`, and the
   latest `CHANGELOG.md` heading stay identical.
+
+### Changed
+
+- Data-format append-only contract encoded explicitly: readers tolerate unknown
+  optional manifest fields and unknown stream kinds (keeping `FORMAT_VERSION` at 1
+  for additive evolution), with forward-compatibility tests and usage docs.

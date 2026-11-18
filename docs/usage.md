@@ -126,6 +126,18 @@ suitable for ordering and per-device timing, and for best-effort alignment
 between two armbands; they are not a hardware-synchronised clock. The manifest
 lists every chunk and gap so a reader can reconstruct the timeline exactly.
 
+## Data format compatibility
+
+Sessions are identified by `format: "myopyc.session"` and `format_version: 1`.
+`FORMAT_VERSION` stays at 1 and evolves only by **adding optional fields**
+(append-only). Writers may add new optional top-level keys, per-device or
+per-stream metadata, per-chunk fields, new gap reasons, or entirely new stream
+kinds; they must never repurpose or remove existing keys. Readers must ignore
+keys they do not understand and must not require newly added optional fields to
+be present, so a session written by a newer tool remains readable by older v0.1+
+readers (which will simply skip unknown stream kinds/fields). Breaking layout or
+dtype changes require a future `format_version` bump.
+
 ## Configuration
 
 Edit `~/.config/myopyc/config.toml` to change bindings, the output directory,
