@@ -8,6 +8,9 @@ Keep a Changelog and the project uses semantic versioning.
 ### Added
 
 - GUI with live 8-channel EMG oscilloscope and IMU traces per armband.
+- Coverage floor for `src/myopyc` (initial 70%) agreed and enforced via
+  `[tool.coverage.report].fail_under` and CI `--cov-fail-under`; raise as the
+  suite grows.
 - Status bar stream-health readout: per-stream observed vs expected sample rate
   and a cumulative dropped-sample counter, refreshed every second whether or not
   a recording is running. A dead link is flagged with a warning marker.
