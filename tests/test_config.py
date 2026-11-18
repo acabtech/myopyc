@@ -23,6 +23,9 @@ def test_config_roundtrip(tmp_path) -> None:
     config.recorder = RecorderSettings(
         flush_interval_s=1.5, max_ram_bytes=1024, output_dir=str(tmp_path)
     )
+    config.ui.emg_window_s = 3.5
+    config.ui.imu_window_s = 6.0
+    config.ui.auto_start_streaming = False
     save_config(config, path)
 
     loaded = load_config(path)
@@ -30,12 +33,18 @@ def test_config_roundtrip(tmp_path) -> None:
     assert loaded.devices[0].label == "Left"
     assert loaded.recorder.flush_interval_s == 1.5
     assert loaded.recorder.max_ram_bytes == 1024
+    assert loaded.ui.emg_window_s == 3.5
+    assert loaded.ui.imu_window_s == 6.0
+    assert loaded.ui.auto_start_streaming is False
 
 
 def test_missing_config_uses_defaults(tmp_path) -> None:
     loaded = load_config(tmp_path / "nope.toml")
     assert loaded.devices == []
     assert loaded.recorder.flush_interval_s == 2.0
+    assert loaded.ui.emg_window_s == 2.0
+    assert loaded.ui.imu_window_s == 4.0
+    assert loaded.ui.auto_start_streaming is True
 
 
 def test_bad_config_falls_back(tmp_path) -> None:
