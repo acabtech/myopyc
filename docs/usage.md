@@ -41,15 +41,25 @@ visible instead of silently corrupting the timeline.
 
 ```bash
 # 10 seconds from two simulated armbands
-myopyc record --seconds 10 --simulate 2
+myopyc record --max-seconds 10 --simulate 2
 
 # real hardware, custom output directory and faster flushes
-myopyc record --seconds 60 --simulate 0 \
+myopyc record --max-seconds 60 --simulate 0 \
   --ble D2:3B:85:94:32:8E=Left \
   --output-dir ~/recordings --flush-interval 1.0
 ```
 
-The command prints periodic counters and a JSON summary, then exits.
+`--max-seconds` (alias: `--seconds`) sets the maximum recording duration in
+seconds (default: `10`). The command prints periodic counters and a JSON
+summary, then exits.
+
+### Exit codes
+
+- `0` — recording completed and the session was finalised successfully.
+- `2` — invalid arguments or a guard rejected the request (for example
+  `--max-seconds` must be a positive number, or no `--simulate`/`--ble` sources
+  were provided).
+- `130` — interrupted by the user (SIGINT / Ctrl+C), when raised to the CLI.
 
 ## Inspecting sessions
 

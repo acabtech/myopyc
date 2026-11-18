@@ -115,12 +115,16 @@ def _cmd_record(args: argparse.Namespace) -> int:
         max_ram_bytes=config.recorder.max_ram_bytes,
         session_name=args.session_name,
     )
+    if args.max_seconds <= 0:
+        print("--max-seconds must be a positive number of seconds", file=sys.stderr)
+        return 2
+
     manager.subscribe(recorder.add)
     recorder.start()
-    print(f"recording {args.seconds:g}s to {recorder.session_dir}", flush=True)
+    print(f"recording {args.max_seconds:g}s to {recorder.session_dir}", flush=True)
     manager.start_all()
 
-    deadline = time.monotonic() + max(0.5, args.seconds)
+    deadline = time.monotonic() + args.max_seconds
     try:
         while time.monotonic() < deadline:
             time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
@@ -204,7 +208,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     record = sub.add_parser("record", help="headless recording run")
     _add_common(record)
-    record.add_argument("--seconds", type=float, default=10.0, help="recording duration")
+    record.add_argument(
+        "--max-seconds",
+        "--seconds",
+        dest="max_seconds",
+        type=float,
+        default=10.0,
+        help="maximum recording duration in seconds (default: 10)",
+    )
     record.add_argument("--session-name", default=None, help="suffix for the session folder")
     record.set_defaults(func=_cmd_record)
 
