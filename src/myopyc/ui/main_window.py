@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -13,6 +14,7 @@ from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
 from myopyc.recorder.reader import SessionReader, find_sessions
 from myopyc.recorder.writer import SessionRecorder
+from myopyc.streams.health import DeviceHealth, RateTracker, format_status_line
 from myopyc.streams.live import LiveBuffer
 from myopyc.ui.plots import DeviceView
 
@@ -36,6 +38,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.manager.subscribe(self._on_samples)
         self._views: dict[str, DeviceView] = {}
         self._recorder: SessionRecorder | None = None
+        self._health = RateTracker()
+        self._last_health_mono: float | None = None
+        self._status_label: QtWidgets.QLabel | None = None
 
         self.setWindowTitle("myopyc - Myo EMG/IMU capture")
         self.resize(1440, 900)
@@ -46,6 +51,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._timer.setInterval(40)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
+
+        # Stream health is reported on a slower cadence than the plots: rates
+        # averaged over ~1 s are stable enough to read and cheap to update.
+        self._health_timer = QtCore.QTimer(self)
+        self._health_timer.setInterval(1000)
+        self._health_timer.timeout.connect(self.refresh_health)
+        self._health_timer.start()
 
         for _ in range(max(0, min(simulate, 2))):
             self._add_simulated()
@@ -101,6 +113,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._grid.setSpacing(8)
         self.setCentralWidget(central)
         self.statusBar().showMessage("ready")
+        # Permanent health widget on the right; transient messages (errors,
+        # "saved …") still use showMessage on the left and never clobber it.
+        self._status_label = QtWidgets.QLabel("stream health idle")
+        self._status_label.setObjectName("streamHealth")
+        self._status_label.setStyleSheet("color: #9aa4b2;")
+        self.statusBar().addPermanentWidget(self._status_label)
 
     # ------------------------------------------------------------------ devices
     def _add_simulated(self) -> None:
@@ -246,11 +264,34 @@ class MainWindow(QtWidgets.QMainWindow):
                 "recording | "
                 f"samples {stats['received_samples']} | "
                 f"buffered {stats['buffered_bytes'] / 1024:.1f} kB | "
-                f"dropped {stats['dropped_samples']} | "
                 f"chunks {stats['chunks_written']}"
             )
-        elif not self.manager.keys:
-            self.statusBar().showMessage("add a simulated arm or connect a Myo")
+
+    # ------------------------------------------------------------------ health
+    def refresh_health(self) -> str:
+        """Recompute per-stream rates/drops and update the status-bar label.
+
+        Runs on a ~1 s cadence, independent of recording state, so the status
+        bar always reflects stream health (observed vs expected Hz) and the
+        cumulative dropped-sample counter. Returns the formatted line (also used
+        by tests to assert the wiring without a display server).
+        """
+
+        now = time.monotonic()
+        dt = 0.0 if self._last_health_mono is None else now - self._last_health_mono
+        self._last_health_mono = now
+
+        devices: list[DeviceHealth] = []
+        for key in self.manager.keys:
+            info = self.manager.info(key)
+            streams = self._health.observe(key, self.manager.counts(key), now=now, dt=dt)
+            devices.append(DeviceHealth(key=key, label=info.label, streams=streams, dropped=0))
+
+        dropped = self._recorder.stats()["dropped_samples"] if self._recorder is not None else 0
+        line = format_status_line(devices, dropped=dropped)
+        if self._status_label is not None:
+            self._status_label.setText(line)
+        return line
 
     # ------------------------------------------------------------------ misc
     def _open_output_dir(self) -> None:

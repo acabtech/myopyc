@@ -8,6 +8,9 @@ Keep a Changelog and the project uses semantic versioning.
 ### Added
 
 - GUI with live 8-channel EMG oscilloscope and IMU traces per armband.
+- Status bar stream-health readout: per-stream observed vs expected sample rate
+  and a cumulative dropped-sample counter, refreshed every second whether or not
+  a recording is running. A dead link is flagged with a warning marker.
 - Up to two concurrent Myo sources via `dl-myo` (BLE, dongleless).
 - Simulated armband source for hardware-free development and demos.
 - MAC-to-label device bindings persisted in `~/.config/myopyc/config.toml`.

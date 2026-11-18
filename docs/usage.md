@@ -18,8 +18,13 @@ Each armband panel shows connection state, battery (when available), the latest
 orientation quaternion, an 8-channel EMG oscilloscope and accelerometer traces.
 The EMG view is decimated for display only; recorded data keeps every sample.
 
-The status bar reports accepted samples, buffered kilobytes, dropped samples
-and chunks written while recording.
+The status bar permanently shows **stream health** on the right: each armband's
+observed sample rate versus its expected rate (EMG ~200 Hz, IMU ~50 Hz) and a
+cumulative **dropped sample** counter, refreshed once a second whether or not you
+are recording. A stream that was flowing but then goes silent is prefixed with a
+`⚠` marker so a dropped BLE link is easy to spot. While recording, the left side
+of the status bar additionally reports accepted samples, buffered kilobytes and
+chunks written.
 
 ## Recording
 
