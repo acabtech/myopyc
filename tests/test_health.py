@@ -46,7 +46,7 @@ def _emg_only_tracker() -> RateTracker:
 
 def test_degraded_when_below_ratio_but_above_zero() -> None:
     tracker = _emg_only_tracker()
-    expected = expected_rate(StreamKind.EMG)
+    expected = int(expected_rate(StreamKind.EMG))
     half = int(expected * (DEGRADED_RATIO / 2))
     tracker.observe("left", {StreamKind.EMG: expected}, now=0.0, dt=1.0)
     (stream,) = tracker.observe("left", {StreamKind.EMG: expected + half}, now=1.0, dt=1.0)
@@ -55,11 +55,11 @@ def test_degraded_when_below_ratio_but_above_zero() -> None:
 
 def test_stalled_after_samples_then_silence() -> None:
     tracker = _emg_only_tracker()
-    expected = expected_rate(StreamKind.EMG)
+    expected = int(expected_rate(StreamKind.EMG))
     tracker.observe("left", {StreamKind.EMG: expected}, now=0.0, dt=1.0)
     (stream,) = tracker.observe("left", {StreamKind.EMG: expected}, now=1.0, dt=1.0)
     assert stream.status == "stalled"
-    assert stream.total == int(expected)  # cumulative count is retained
+    assert stream.total == expected  # cumulative count is retained
 
 
 def test_reset_clears_history() -> None:

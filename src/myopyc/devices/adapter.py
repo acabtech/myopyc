@@ -127,7 +127,7 @@ class DlMyoSource:
             async def on_emg_data(self, emg: EMGData) -> None:
                 source._on_emg(emg)
 
-            async def on_emg_data_aggregated(self, eds) -> None:  # type: ignore[no-untyped-def]
+            async def on_emg_data_aggregated(self, eds) -> None:
                 return None
 
             async def on_fv_data(self, fvd: FVData) -> None:
@@ -172,7 +172,7 @@ class DlMyoSource:
             await client.disconnect()
 
     # ------------------------------------------------------------------ decoding
-    def _on_emg(self, emg) -> None:  # type: ignore[no-untyped-def]
+    def _on_emg(self, emg) -> None:
         t_ns = time.monotonic_ns()
         rows = np.empty(2, dtype=EMG_DTYPE)
         rows["t_ns"] = (t_ns, t_ns)
@@ -182,7 +182,7 @@ class DlMyoSource:
         self._emg_seq += 2
         self._emit(SampleBatch(self.info.key, StreamKind.EMG, rows))
 
-    def _on_imu(self, imu) -> None:  # type: ignore[no-untyped-def]
+    def _on_imu(self, imu) -> None:
         row = np.empty(1, dtype=IMU_DTYPE)
         row["t_ns"] = time.monotonic_ns()
         row["seq"] = self._imu_seq

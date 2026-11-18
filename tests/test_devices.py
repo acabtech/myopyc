@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from myopyc.devices.manager import DeviceManager
+from myopyc.devices.model import SampleBatch
 from myopyc.streams.schema import StreamKind
 
 
@@ -17,7 +18,7 @@ def _wait_until(predicate, timeout: float = 3.0) -> bool:
 
 def test_simulated_device_streams_emg_and_imu() -> None:
     manager = DeviceManager()
-    batches = []
+    batches: list[SampleBatch] = []
     manager.subscribe(batches.append)
     info = manager.add_simulated("Left")
     manager.start_all()

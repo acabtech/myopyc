@@ -20,5 +20,6 @@ jobs:
         run: |
           uv run ruff check .
           uv run ruff format --check .
+          uv run mypy src/myopyc tests
       - name: Test
         run: uv run pytest --cov=myopyc --cov-report=term-missing --cov-fail-under=70

@@ -296,7 +296,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------ misc
     def _open_output_dir(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        QtGui.QDesktopServices.openUrl(QtGui.QUrl.fromLocalFile(str(self.output_dir)))
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(self.output_dir)))
 
     def saved_sessions(self) -> list[Path]:
         return find_sessions(self.output_dir)

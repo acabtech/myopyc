@@ -26,7 +26,10 @@ from myopyc.ui.main_window import MainWindow
 
 @pytest.fixture(scope="module")
 def qapp() -> QtWidgets.QApplication:
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication([])
+    assert isinstance(app, QtWidgets.QApplication)
     return app
 
 
@@ -69,6 +72,7 @@ def test_status_bar_has_permanent_health_widget(qapp: QtWidgets.QApplication) ->
 def test_idle_hint_when_no_devices(qapp: QtWidgets.QApplication) -> None:
     window = MainWindow(_config(), simulate=0)
     try:
+        assert window._status_label is not None
         line = window.refresh_health()
         assert line == "add a simulated arm or connect a Myo"
         assert window._status_label.text() == line
@@ -83,6 +87,7 @@ def test_refresh_reports_rates_and_drops(
 ) -> None:
     window = MainWindow(_config(), simulate=0)
     try:
+        assert window._status_label is not None
         info = window.manager.add_simulated("Left")
         key = info.key
 

@@ -17,6 +17,7 @@ test:
 lint:
 	uv run ruff check .
 	uv run ruff format --check .
+	uv run mypy src/myopyc tests
 
 format:
 	uv run ruff check --fix .

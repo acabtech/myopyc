@@ -20,7 +20,11 @@ def run_gui(
     from myopyc.ui.main_window import MainWindow
     from myopyc.ui.theme import apply_theme
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    existing = QtWidgets.QApplication.instance()
+    if isinstance(existing, QtWidgets.QApplication):
+        app = existing
+    else:
+        app = QtWidgets.QApplication(sys.argv)
     apply_theme(app)
     window = MainWindow(
         config,

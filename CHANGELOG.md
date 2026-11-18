@@ -8,6 +8,8 @@ Keep a Changelog and the project uses semantic versioning.
 ### Added
 
 - GUI with live 8-channel EMG oscilloscope and IMU traces per armband.
+- Mypy typing coverage extended to `tests/` (alongside `src/myopyc`), with current
+  typing issues fixed and checks wired into `make lint` and CI.
 - Coverage floor for `src/myopyc` (initial 70%) agreed and enforced via
   `[tool.coverage.report].fail_under` and CI `--cov-fail-under`; raise as the
   suite grows.

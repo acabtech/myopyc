@@ -22,7 +22,11 @@ from myopyc.ui.main_window import MainWindow
 
 @pytest.fixture(scope="module")
 def qapp() -> QtWidgets.QApplication:
-    return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication([])
+    assert isinstance(app, QtWidgets.QApplication)
+    return app
 
 
 def _window(config: AppConfig) -> MainWindow:
