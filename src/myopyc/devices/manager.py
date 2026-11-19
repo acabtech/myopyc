@@ -121,6 +121,7 @@ class DeviceManager:
             self._emit,
             self._on_status,
             seed=sum(ord(char) for char in key),
+            battery=self._on_battery,
         )
         self._register(info)
         self._sources[key] = source

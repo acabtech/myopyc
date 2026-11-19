@@ -285,7 +285,15 @@ class MainWindow(QtWidgets.QMainWindow):
         for key in self.manager.keys:
             info = self.manager.info(key)
             streams = self._health.observe(key, self.manager.counts(key), now=now, dt=dt)
-            devices.append(DeviceHealth(key=key, label=info.label, streams=streams, dropped=0))
+            devices.append(
+                DeviceHealth(
+                    key=key,
+                    label=info.label,
+                    streams=streams,
+                    dropped=0,
+                    battery=self.manager.battery(key),
+                )
+            )
 
         dropped = self._recorder.stats()["dropped_samples"] if self._recorder is not None else 0
         line = format_status_line(devices, dropped=dropped)

@@ -8,6 +8,7 @@ loop and the recorder never wait on Bluetooth.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import time
@@ -153,16 +154,14 @@ class DlMyoSource:
                 emg_mode=EMGMode.SEND_RAW,
                 imu_mode=IMUMode.SEND_DATA,
             )
-            try:
-                level = await client.battery_level()
-                self._battery(self.info.key, int(level))
-            except Exception:
-                log.debug("battery level unavailable for %s", self.info.mac)
-
             self._stop_event = asyncio.Event()
             await client.start()
+            battery_task = asyncio.create_task(self._battery_loop(client))
             self._status(self.info.key, "streaming", "raw EMG + IMU")
             await self._stop_event.wait()
+            battery_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await battery_task
             self._status(self.info.key, "stopping", None)
         finally:
             try:
@@ -170,6 +169,23 @@ class DlMyoSource:
             except Exception:
                 log.debug("stop() failed for %s", self.info.mac, exc_info=True)
             await client.disconnect()
+
+    # ------------------------------------------------------------------ battery
+    async def _battery_loop(self, client) -> None:
+        """Report the battery level, then re-read it every ~60 s.
+
+        Runs as a background task next to the stream loop so a slow/failing
+        battery read can never block EMG/IMU delivery. A failed read keeps the
+        previously reported level rather than blanking the UI.
+        """
+
+        while True:
+            try:
+                level = await client.battery_level()
+                self._battery(self.info.key, int(level))
+            except Exception:
+                log.debug("battery level unavailable for %s", self.info.mac, exc_info=True)
+            await asyncio.sleep(60.0)
 
     # ------------------------------------------------------------------ decoding
     def _on_emg(self, emg) -> None:

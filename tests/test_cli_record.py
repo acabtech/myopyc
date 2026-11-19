@@ -8,35 +8,14 @@ from pathlib import Path
 from myopyc.cli import main
 
 
-def test_record_rejects_non_positive_max_seconds(tmp_path: Path, capsys) -> None:
-    code = main(
-        [
-            "record",
-            "--max-seconds",
-            "0",
-            "--simulate",
-            "1",
-            "--output-dir",
-            str(tmp_path),
-        ]
-    )
-    assert code == 2
-    err = capsys.readouterr().err
-    assert "--max-seconds must be a positive number of seconds" in err
+import pytest
 
 
-def test_record_rejects_negative_seconds_alias(tmp_path: Path, capsys) -> None:
-    code = main(
-        [
-            "record",
-            "--seconds",
-            "-1",
-            "--simulate",
-            "1",
-            "--output-dir",
-            str(tmp_path),
-        ]
-    )
+@pytest.mark.parametrize(
+    ("flag", "value"), [("--max-seconds", "0"), ("--seconds", "-1")]
+)
+def test_record_rejects_non_positive_seconds(flag: str, value: str, tmp_path: Path, capsys) -> None:
+    code = main(["record", flag, value, "--simulate", "1", "--output-dir", str(tmp_path)])
     assert code == 2
     err = capsys.readouterr().err
     assert "--max-seconds must be a positive number of seconds" in err

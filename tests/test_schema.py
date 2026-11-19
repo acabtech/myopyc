@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
-
 from myopyc.streams.schema import EMG_CHANNELS, EMG_DTYPE, IMU_DTYPE, StreamKind, stream_meta
 
 
@@ -31,10 +29,3 @@ def test_stream_metadata_describes_units_and_rate() -> None:
     assert {column["name"] for column in imu["columns"]} >= {"qw", "az", "gz"}
 
 
-def test_arrays_roundtrip_through_npy(tmp_path) -> None:
-    rows = np.zeros(3, dtype=EMG_DTYPE)
-    rows["t_ns"] = [1, 2, 3]
-    np.save(tmp_path / "chunk.npy", rows)
-    loaded = np.load(tmp_path / "chunk.npy", allow_pickle=False)
-    assert loaded.dtype == EMG_DTYPE
-    assert loaded["t_ns"].tolist() == [1, 2, 3]

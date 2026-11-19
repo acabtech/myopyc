@@ -54,6 +54,21 @@ def test_two_devices_and_limit() -> None:
         raise AssertionError("expected device limit to be enforced")
 
 
+def test_battery_reported_and_cleared_on_remove() -> None:
+    """Simulated device publishes a plausible battery level; removal clears it."""
+    manager = DeviceManager()
+    info = manager.add_simulated("Left")
+    manager.start_all()
+    try:
+        assert _wait_until(lambda: manager.battery(info.key) is not None)
+        level = manager.battery(info.key)
+        assert level is not None and 15 <= level <= 95
+    finally:
+        manager.stop_all()
+    manager.remove(info.key)
+    assert manager.battery(info.key) is None
+
+
 def test_remove_device() -> None:
     manager = DeviceManager()
     info = manager.add_simulated("Left")

@@ -14,6 +14,7 @@ from myopyc.streams.schema import EMG_CHANNELS, EMG_DTYPE, IMU_DTYPE, StreamKind
 
 EmitFn = Callable[[SampleBatch], None]
 StatusFn = Callable[[str, str, str | None], None]
+BatteryFn = Callable[[str, int], None]
 
 
 class SimulatedSource:
@@ -30,10 +31,12 @@ class SimulatedSource:
         status: StatusFn | None = None,
         *,
         seed: int = 0,
+        battery: BatteryFn | None = None,
     ) -> None:
         self.info = info
         self._emit = emit
         self._status = status or (lambda *_: None)
+        self._battery = battery or (lambda *_: None)
         self._rng = np.random.default_rng(seed)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -41,6 +44,12 @@ class SimulatedSource:
         self._imu_seq = 0
         self._started_at = 0.0
         self._phase = float(seed % 7) * 0.7
+        # Simulated charge: starts somewhere in 55..95 % and drains ~1 % per
+        # second of wall time, bottoming out at 15 % — fast enough to watch the
+        # low-battery UI path in a demo, slow enough to stay plausible.
+        self._battery_level = int(self._rng.integers(55, 96))
+        self._battery_floor = 15
+        self._battery_last_emit = 0.0
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> None:
@@ -51,6 +60,7 @@ class SimulatedSource:
         self._thread = threading.Thread(target=self._run, name=f"sim-{self.info.key}", daemon=True)
         self._thread.start()
         self._status(self.info.key, "streaming", "simulated")
+        self._battery(self.info.key, self._battery_level)
 
     def stop(self) -> None:
         self._stop.set()
@@ -71,6 +81,7 @@ class SimulatedSource:
             now = time.monotonic()
             elapsed = now - self._started_at
             self._emit(self._make_emg(elapsed, emg_per_block))
+            self._tick_battery(elapsed)
             for _ in range(imu_per_block):
                 self._emit(self._make_imu(elapsed))
             next_tick += self.block_seconds
@@ -125,3 +136,12 @@ class SimulatedSource:
         row["gz"] = math.sin(elapsed * 0.4) * 4.0
         self._imu_seq += 1
         return SampleBatch(self.info.key, StreamKind.IMU, row)
+
+    def _tick_battery(self, elapsed: float) -> None:
+        """Drain the simulated cell and push an update ~once per second."""
+
+        if elapsed - self._battery_last_emit < 1.0:
+            return
+        self._battery_last_emit = elapsed
+        self._battery_level = max(self._battery_floor, self._battery_level - 1)
+        self._battery(self.info.key, self._battery_level)

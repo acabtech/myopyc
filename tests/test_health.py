@@ -86,28 +86,70 @@ def test_device_status_worst_of_streams() -> None:
     assert device.status == "stalled"
 
 
-def test_format_device_line() -> None:
-    streams = (
-        StreamHealth(StreamKind.EMG, observed_hz=200.0, expected_hz=200.0, total=200),
-        StreamHealth(StreamKind.IMU, observed_hz=50.0, expected_hz=50.0, total=50),
-    )
-    device = DeviceHealth(key="left", label="Left", streams=streams)
-    assert format_device_line(device) == "Left: emg 200/200 Hz, imu 50/50 Hz"
+def _healthy_emg_stream() -> StreamHealth:
+    return StreamHealth(StreamKind.EMG, observed_hz=200.0, expected_hz=200.0, total=200)
+
+
+@pytest.mark.parametrize(
+    ("device", "expected"),
+    [
+        pytest.param(
+            DeviceHealth(
+                key="left",
+                label="Left",
+                streams=(
+                    _healthy_emg_stream(),
+                    StreamHealth(StreamKind.IMU, observed_hz=50.0, expected_hz=50.0, total=50),
+                ),
+            ),
+            "Left: emg 200/200 Hz, imu 50/50 Hz",
+            id="two-streams",
+        ),
+        pytest.param(
+            DeviceHealth(
+                key="left", label="Left", streams=(_healthy_emg_stream(),), battery=76
+            ),
+            "Left: emg 200/200 Hz, battery 76%",
+            id="battery-known",
+        ),
+        pytest.param(
+            DeviceHealth(key="left", label="Left", streams=(_healthy_emg_stream(),), battery=None),
+            "Left: emg 200/200 Hz",
+            id="battery-unknown",
+        ),
+    ],
+)
+def test_format_device_line(device: DeviceHealth, expected: str) -> None:
+    assert format_device_line(device) == expected
 
 
 def test_format_status_line_empty_hint() -> None:
     assert format_status_line([], dropped=0) == "add a simulated arm or connect a Myo"
 
 
-def test_format_status_line_normal() -> None:
-    streams = (StreamHealth(StreamKind.EMG, observed_hz=200.0, expected_hz=200.0, total=200),)
-    line = format_status_line([DeviceHealth(key="left", label="Left", streams=streams)], dropped=3)
-    assert line == "Left: emg 200/200 Hz | dropped 3"
-    assert "⚠" not in line
-
-
-def test_format_status_line_warns_on_stall() -> None:
-    streams = (StreamHealth(StreamKind.EMG, observed_hz=0.0, expected_hz=200.0, total=999),)
-    line = format_status_line([DeviceHealth(key="left", label="Left", streams=streams)], dropped=0)
-    assert line.startswith("⚠")
-    assert "dropped 0" in line
+@pytest.mark.parametrize(
+    ("streams", "dropped", "expected"),
+    [
+        pytest.param(
+            (_healthy_emg_stream(),),
+            3,
+            "Left: emg 200/200 Hz | dropped 3",
+            id="normal",
+        ),
+        pytest.param(
+            (StreamHealth(StreamKind.EMG, observed_hz=0.0, expected_hz=200.0, total=999),),
+            0,
+            "⚠ Left: emg 0/200 Hz | dropped 0",
+            id="stall-warns",
+        ),
+    ],
+)
+def test_format_status_line(
+    streams: tuple[StreamHealth, ...], dropped: int, expected: str
+) -> None:
+    line = format_status_line([DeviceHealth(key="left", label="Left", streams=streams)], dropped)
+    assert line == expected
+    if expected.startswith("⚠"):
+        assert "dropped 0" in line
+    else:
+        assert "⚠" not in line

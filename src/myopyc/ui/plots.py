@@ -117,7 +117,17 @@ class DeviceView(QtWidgets.QGroupBox):
             "stopping": "#ffd166",
         }.get(state, "#9aa4b2")
         self.status_label.setStyleSheet(f"color: {color};")
-        self.battery_label.setText(f"battery {battery}%" if battery is not None else "")
+        if battery is None:
+            self.battery_label.setText("")
+        else:
+            self.battery_label.setText(f"battery {battery}%")
+            if battery <= 15:
+                color = "#ff6b6b"
+            elif battery <= 40:
+                color = "#ffd166"
+            else:
+                color = "#48d1cc"
+            self.battery_label.setStyleSheet(f"color: {color};")
 
     def refresh(self) -> None:
         emg = self.live.snapshot(self.info.key, StreamKind.EMG)

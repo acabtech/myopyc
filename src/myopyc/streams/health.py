@@ -79,6 +79,7 @@ class DeviceHealth:
     label: str
     streams: tuple[StreamHealth, ...]
     dropped: int = 0
+    battery: int | None = None
 
     @property
     def status(self) -> str:
@@ -163,7 +164,8 @@ def format_device_line(device: DeviceHealth) -> str:
     """
 
     streams = ", ".join(_format_stream(s) for s in device.streams)
-    return f"{device.label}: {streams}"
+    battery = "" if device.battery is None else f", battery {device.battery}%"
+    return f"{device.label}: {streams}{battery}"
 
 
 def format_status_line(devices: Sequence[DeviceHealth], *, dropped: int) -> str:
