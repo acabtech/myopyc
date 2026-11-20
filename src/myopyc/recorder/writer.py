@@ -67,7 +67,7 @@ class SessionRecorder:
         self.session_id = f"{stamp}_{uuid.uuid4().hex[:6]}"
         self.session_dir = self.output_dir / f"{self.session_id}{suffix}"
 
-        stream_count = len(self.devices) * 2
+        stream_count = len(self.devices) * len(StreamKind)
         self._per_stream_cap = max(1, self.max_ram_bytes // stream_count)
 
         self._lock = threading.RLock()

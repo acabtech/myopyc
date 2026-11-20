@@ -7,6 +7,16 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- `StreamKind.EVENT` stream foundation (first slice of the v0.2 gesture/pose
+  work): a dedicated third stream kind with its own dtype (`t_ns`, `seq`,
+  `type`, packed `ox/oy/oz/ow` orientation payload) and a documented pose
+  vocabulary (`0` none, `1` fist, `2` wave_left, `3` wave_right,
+  `4` double_click; unknown codes render as `unknown-<n>`). The recorder
+  creates per-device `event/` chunk directories, the manifest lists the
+  event-driven stream (`sample_rate_hz` 0.0), and `SessionReader` loads it like
+  EMG/IMU. Purely additive — `FORMAT_VERSION` stays 1 and old readers still
+  load sessions that carry an event stream. Round-trip and dtype-layout tests
+  cover the writer → manifest → reader path.
 - Battery level shown per device: a color-coded `battery N%` label in each
   device panel (red ≤ 15%, amber ≤ 40%) and in the status-bar health line, fed
   from both the BLE adapter's periodic read (~60 s) and the simulated source's

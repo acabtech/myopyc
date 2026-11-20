@@ -211,7 +211,7 @@ def test_reader_repair_and_enum_guard(tmp_path: Path) -> None:
     assert SessionReader(session_dir).load_stream("left", "emg").size == 5
 
     # Guard: repair relies on StreamKind(value) round-tripping the manifest keys.
-    assert {kind.value for kind in StreamKind} == {"emg", "imu"}
+    assert {kind.value for kind in StreamKind} == {"emg", "imu", "event"}
 
 
 # A real subprocess that is SIGKILLed partway through writing a chunk, so the

@@ -5,8 +5,8 @@ import pytest
 from myopyc.recorder.manifest import read_manifest
 from myopyc.recorder.reader import SessionReader, find_sessions
 from myopyc.recorder.writer import SessionRecorder
-from myopyc.streams.schema import StreamKind
-from tests.conftest import make_emg, make_imu
+from myopyc.streams.schema import EVENT_TYPE_IDS, StreamKind, event_type_name
+from tests.conftest import make_emg, make_event, make_imu
 
 DEVICES = {
     "left": {"label": "Left", "mac": "SIM-LEFT", "name": "Simulated Myo"},
@@ -90,6 +90,50 @@ def test_unknown_device_raises(tmp_path) -> None:
         recorder.stop()
 
 
+def test_event_stream_roundtrip(tmp_path) -> None:
+    """EVENT is a first-class third stream: recorded like EMG/IMU, readable back."""
+    recorder = _recorder(tmp_path)
+    recorder.add(
+        make_event("left", count=3, start_seq=0, t0=1_000_000_000, type_code=EVENT_TYPE_IDS["fist"])
+    )
+    recorder.add(make_emg("left", count=4, t0=1_000_000_000))
+    recorder.add(make_event("right", count=1, type_code=EVENT_TYPE_IDS["double_click"]))
+    recorder.stop()
+
+    manifest = read_manifest(recorder.session_dir)
+    event_entry = manifest["devices"]["left"]["streams"]["event"]
+    assert event_entry["samples"] == 3
+    assert event_entry["sample_rate_hz"] == 0.0  # event-driven stream
+    assert manifest["devices"]["right"]["streams"]["event"]["samples"] == 1
+
+    reader = SessionReader(recorder.session_dir)
+    data = reader.load()
+    events = data["left"][StreamKind.EVENT].samples
+    assert events.size == 3
+    assert events["seq"].tolist() == [0, 1, 2]
+    assert events["type"].tolist() == [EVENT_TYPE_IDS["fist"]] * 3
+    assert data["left"][StreamKind.EMG].samples.size == 4
+    assert data["right"][StreamKind.EVENT].samples["type"].tolist() == [
+        EVENT_TYPE_IDS["double_click"]
+    ]
+
+    # The typed reader renders the pose names without breaking on unknown codes.
+    assert event_type_name(int(events["type"][0])) == "fist"
+    assert summary_kinds(reader) == {
+        ("left", "emg"),
+        ("left", "imu"),
+        ("left", "event"),
+        ("right", "emg"),
+        ("right", "imu"),
+        ("right", "event"),
+    }
+
+
+def summary_kinds(reader: SessionReader) -> set[tuple[str, str]]:
+    summary = reader.summary()
+    return {(row["device"], row["stream"]) for row in summary["streams"]}
+
+
 def test_find_sessions(tmp_path) -> None:
     recorder = _recorder(tmp_path)
     recorder.stop()
@@ -115,10 +159,11 @@ def test_append_only_manifest_fields_ignored(tmp_path) -> None:
     # Optional top-level fields that future writers may add.
     manifest["markers"] = [{"t_ns": 1_000_000_000, "label": "start"}]
     manifest["future_flag"] = {"enabled": True}
-    # Extra per-stream field and an entirely unknown stream kind (v0.2 EVENT).
+    # Extra per-stream field and an entirely unknown stream kind ("event" is a
+    # known v0.2 kind now, so use a genuinely future name to test the skip path).
     left_streams = manifest["devices"]["left"]["streams"]
     left_streams["emg"]["calibration"] = {"offset": 0}
-    left_streams["event"] = {
+    left_streams["future_stream"] = {
         "chunks": [],
         "samples": 0,
         "dropped_samples": 0,
@@ -133,9 +178,9 @@ def test_append_only_manifest_fields_ignored(tmp_path) -> None:
 
     reader = SessionReader(session_dir)
     # Unknown keys are preserved on disk and visible via the raw manifest, but the
-    # typed reader continues to understand EMG/IMU exactly as before.
+    # typed reader continues to understand EMG/IMU/EVENT exactly as before.
     assert reader.manifest["markers"][0]["label"] == "start"
-    assert "event" in reader.manifest["devices"]["left"]["streams"]
+    assert "future_stream" in reader.manifest["devices"]["left"]["streams"]
 
     data = reader.load()
     emg = data["left"][StreamKind.EMG].samples
@@ -147,7 +192,9 @@ def test_append_only_manifest_fields_ignored(tmp_path) -> None:
     assert summary["status"] == "stopped"
     kinds = {(row["device"], row["stream"]) for row in summary["streams"]}
     assert ("left", "emg") in kinds and ("right", "imu") in kinds
-    assert all(row["stream"] in {"emg", "imu"} for row in summary["streams"])
+    # Known kinds are understood; the unknown future stream is skipped.
+    assert all(row["stream"] in {"emg", "imu", "event"} for row in summary["streams"])
+    assert not any(row["stream"] == "future_stream" for row in summary["streams"])
 
     # A reader path that never asked to mutate the session leaves it intact.
     assert read_manifest(session_dir)["markers"][0]["label"] == "start"

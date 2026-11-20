@@ -56,7 +56,7 @@ def new_manifest(
                     "samples": 0,
                     "dropped_samples": 0,
                 }
-                for kind in (StreamKind.EMG, StreamKind.IMU)
+                for kind in StreamKind
             },
         }
 

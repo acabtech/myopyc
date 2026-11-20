@@ -20,7 +20,8 @@ A session is one self-contained directory:
     ├── left/
     │   ├── emg/chunk-00000.npy
     │   ├── emg/chunk-00001.npy
-    │   └── imu/chunk-00000.npy
+    │   ├── imu/chunk-00000.npy
+    │   └── event/chunk-00000.npy
     └── right/
         ├── emg/chunk-00000.npy
         └── imu/chunk-00000.npy
@@ -93,6 +94,11 @@ Chunk entries (one per `.npy` file):
 | `t_end_ns` | integer | `t_ns` of the last record. |
 | `bytes` | integer | Size of the `.npy` file on disk at write time. |
 
+The set of stream kinds a session may carry is not fixed at `1`: v1 sessions
+record `emg` and `imu` from the start, and the event-driven `event` kind was
+added later (see [EVENT](#event-deviceskeyeventchunk-nnnnnpy)). Readers must
+skip stream keys they do not know.
+
 ## Chunk dtypes
 
 Chunks are NumPy structured arrays saved with `np.save(..., allow_pickle=False)`,
@@ -119,6 +125,21 @@ Expected rate: ~200 Hz per channel.
 | `gx`, `gy`, `gz` | `<f4` | deg/s | Gyroscope in degrees per second. |
 
 Expected rate: ~50 Hz.
+
+### EVENT (`devices/<key>/event/chunk-NNNNN.npy`)
+
+| Field | Dtype | Unit | Meaning |
+|---|---|---|---|
+| `t_ns` | `<i8` | ns | Host monotonic receive time. |
+| `seq` | `<i8` | 1 | Per-stream sequence counter, independent of the EMG/IMU counters; survives disconnect/reconnect for the same device key. |
+| `type` | `u1` | code | Gesture/pose code: `0` = no pose, `1` = fist, `2` = wave_left, `3` = wave_right, `4` = double_click. Unknown codes must be tolerated (render as `unknown-<n>`); new codes may be added append-only. |
+| `ox`, `oy`, `oz`, `ow` | `<f4` | quaternion | Packed orientation payload captured at event time (quaternion `(x, y, z, w)`); zeroed when not applicable. |
+
+Expected rate: none — the EVENT stream is **event-driven**, so its manifest
+`sample_rate_hz` is `0.0` and readers must not infer a rate or staleness from
+it. Introduced in v0.2 as an additive third stream kind (per the append-only
+contract below); v0.1 readers skip it, and sessions that carry it remain
+valid v1 sessions.
 
 ## Timebase and `t_ns`
 
