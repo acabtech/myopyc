@@ -113,10 +113,18 @@ class DeviceView(QtWidgets.QGroupBox):
         color = {
             "streaming": "#48d1cc",
             "error": "#ff6b6b",
+            # Reconnecting gets its own alarming amber: the link dropped and the
+            # adapter is retrying — the most important transient state to notice.
+            "reconnecting": "#ff9f43",
             "connecting": "#ffd166",
             "stopping": "#ffd166",
         }.get(state, "#9aa4b2")
         self.status_label.setStyleSheet(f"color: {color};")
+        self.status_label.setToolTip(
+            "Connection states: streaming (teal), connecting/reconnecting (amber), "
+            "reconnecting means the BLE link dropped and an automatic retry with "
+            "backoff is running, error (red) means retries stopped failing."
+        )
         if battery is None:
             self.battery_label.setText("")
         else:

@@ -203,3 +203,72 @@ def test_format_event_stream_shows_window_count() -> None:
     assert format_device_line(DeviceHealth(key="left", label="Left", streams=(idle,))) == (
         "Left: event 0 in window"
     )
+
+
+# ------------------------------------------------------------------ connection state
+def test_connection_state_tagged_only_when_not_streaming() -> None:
+    """A non-default connection state gets a visible tag; streaming stays quiet."""
+
+    healthy = _healthy_emg_stream()
+    # The steady state (streaming) adds no tag — the line stays short.
+    assert format_device_line(
+        DeviceHealth(key="left", label="Left", streams=(healthy,), connection="streaming")
+    ) == "Left: emg 200/200 Hz"
+    # Unknown state (None) renders as nothing, e.g. in unit tests.
+    assert format_device_line(
+        DeviceHealth(key="left", label="Left", streams=(healthy,), connection=None)
+    ) == "Left: emg 200/200 Hz"
+    # A dropped BLE link shows up right in the label.
+    assert format_device_line(
+        DeviceHealth(key="left", label="Left", streams=(healthy,), connection="reconnecting")
+    ) == "Left [reconnecting]: emg 200/200 Hz"
+
+
+def test_reconnecting_device_warns_even_with_no_stall() -> None:
+    """A dropped link warns even though rate math alone would not flag it.
+
+    During a reconnect no samples arrive, which the tracker reads as a
+    quiet/idle stream — the connection state is what makes the drop visible.
+    """
+
+    # Idle streams (no samples ever) plus reconnecting: must warn.
+    reconnecting = DeviceHealth(
+        key="left",
+        label="Left",
+        streams=(StreamHealth(StreamKind.EMG, observed_hz=0.0, expected_hz=200.0, total=0),),
+        connection="reconnecting",
+    )
+    assert reconnecting.warns is True
+    line = format_status_line([reconnecting], dropped=0)
+    assert line.startswith("⚠")
+    assert "Left [reconnecting]" in line
+
+    # The same idle streams with connection streaming/None do not warn.
+    quiet = DeviceHealth(
+        key="left",
+        label="Left",
+        streams=reconnecting.streams,
+        connection="streaming",
+    )
+    assert quiet.warns is False
+    unknown = DeviceHealth(key="left", label="Left", streams=reconnecting.streams)
+    assert unknown.warns is False
+
+    # Error state warns too.
+    assert DeviceHealth(
+        key="left", label="Left", streams=(_healthy_emg_stream(),), connection="error"
+    ).warns is True
+
+
+def test_stalled_stream_still_warns_regardless_of_connection() -> None:
+    """The pre-existing stall warning is not weakened by the connection field."""
+
+    stalled = DeviceHealth(
+        key="left",
+        label="Left",
+        streams=(StreamHealth(StreamKind.EMG, observed_hz=0.0, expected_hz=200.0, total=999),),
+        connection="streaming",
+    )
+    assert stalled.warns is True
+    assert stalled.status == "stalled"
+    assert format_status_line([stalled], dropped=0).startswith("⚠")

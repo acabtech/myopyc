@@ -109,7 +109,10 @@ def test_refresh_reports_rates_and_drops(
         window.manager._emit(_emg(key, 200))
         window.manager._emit(_imu(key, 50))
         first = window.refresh_health()
-        assert "Left:" in first and "dropped 0" in first
+        # The simulated device is never started in this test, so its idle
+        # connection state is tagged in the line (non-default states are).
+        assert "Left [idle]" in first and "dropped 0" in first
+        assert not first.startswith("⚠")  # idle state alone is not a warning
 
         # Second window: another full second of samples -> observed == expected.
         window.manager._emit(_emg(key, 200))
@@ -150,5 +153,26 @@ def test_device_view_window_durations(
         view = window._views[info.key]
         assert view.emg.window_s == expected_emg
         assert view.imu.window_s == expected_imu
+    finally:
+        _close(window)
+
+
+def test_device_view_shows_reconnecting_state(qapp: QtWidgets.QApplication) -> None:
+    """A dropped BLE link is surfaced in the device panel header in amber."""
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        info = window.manager.add_simulated("Left")
+        window._mount_view(info)
+        view = window._views[info.key]
+
+        view.update_display("reconnecting", "link dropped", None)
+        assert view.status_label.text() == "reconnecting - link dropped"
+        assert "ff9f43" in view.status_label.styleSheet()  # the amber reconnecting color
+
+        # Once the link returns, the header flips back to the teal streaming.
+        view.update_display("streaming", "raw EMG + IMU", 80)
+        assert view.status_label.text() == "streaming - raw EMG + IMU"
+        assert "48d1cc" in view.status_label.styleSheet()
     finally:
         _close(window)

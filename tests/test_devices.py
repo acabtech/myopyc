@@ -121,6 +121,22 @@ def test_manager_streams_counts_and_state() -> None:
     assert manager.state(info.key) == "stopped"
 
 
+def test_manager_accepts_reconnecting_state() -> None:
+    """The BLE adapter's reconnecting state is a first-class DeviceState.
+
+    The adapter reports ``reconnecting`` while its backoff loop retries a
+    dropped link; the manager must store it (typed) so the UI can surface it
+    instead of showing a stale ``streaming`` state forever.
+    """
+
+    manager = DeviceManager()
+    info = manager.add_simulated("Left")
+    manager._on_status(info.key, "streaming", "raw EMG + IMU")
+    manager._on_status(info.key, "reconnecting", "link dropped")
+    assert manager.state(info.key) == "reconnecting"
+    assert manager.detail(info.key) == "link dropped"
+
+
 def test_two_devices_and_limit() -> None:
     manager = DeviceManager()
     left = manager.add_simulated("Left")

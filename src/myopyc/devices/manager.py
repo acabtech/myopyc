@@ -14,7 +14,9 @@ from myopyc.streams.schema import StreamKind
 
 log = logging.getLogger(__name__)
 
-DeviceState = Literal["idle", "connecting", "streaming", "stopping", "stopped", "error"]
+DeviceState = Literal[
+    "idle", "connecting", "streaming", "reconnecting", "stopping", "stopped", "error"
+]
 SampleFn = Callable[[SampleBatch], None]
 
 MAX_DEVICES = 2

@@ -80,11 +80,21 @@ Keep a Changelog and the project uses semantic versioning.
   optional manifest fields and unknown stream kinds (keeping `FORMAT_VERSION` at 1
   for additive evolution), with forward-compatibility tests and usage docs.
 
+### Changed
+
+- BLE disconnect/reconnect behaviour is now surfaced in the UI and documented:
+  a dropped link shows the device state as `reconnecting` (amber) in the device
+  panel header, and the status-bar health line tags any device that is not
+  streaming (e.g. `Left [reconnecting]: emg 0/200 Hz …`) and prefixes it with a
+  warning marker while a device is reconnecting or in `error` — previously a
+  dropped link could pass for a quiet stream. The reconnect policy (indefinite
+  retries with exponential backoff capped at 30 s, patient discovery/connect
+  retries, sequence counters and last-known battery persisting across drops)
+  is documented in [docs/setup-linux.md](docs/setup-linux.md). Gates 0.1.1.
+
 ### Known limitations
 
 - The 30-minute dual-Myo hardware soak test is pending; it will validate BLE
   link stability over long captures before/shortly after this tag. Crash-safe
   session repair (`myopyc inspect --repair`) mitigates interrupted recordings
   in the meantime.
-- BLE disconnect/reconnect handling is documented for the next patch release
-  (0.1.x).

@@ -89,13 +89,24 @@ class StreamHealth:
 
 @dataclass(frozen=True)
 class DeviceHealth:
-    """Aggregate stream health for one device plus its dropped-sample count."""
+    """Aggregate stream health for one device plus its dropped-sample count.
+
+    ``connection`` is the raw device state reported by
+    :class:`~myopyc.devices.manager.DeviceManager` (e.g. ``streaming``,
+    ``reconnecting``); ``None`` when unknown, which renders as nothing.
+    """
 
     key: str
     label: str
     streams: tuple[StreamHealth, ...]
     dropped: int = 0
     battery: int | None = None
+    connection: str | None = None
+
+    #: Device connection states that deserve a visible warning even when the
+    #: stream-rate math still looks fine (e.g. a dropped BLE link that the
+    #: adapter is currently retrying).
+    WARN_CONNECTION_STATES = frozenset({"reconnecting", "error"})
 
     @property
     def status(self) -> str:
@@ -110,6 +121,20 @@ class DeviceHealth:
             return "idle"
         order = {"healthy": 0, "idle": 1, "degraded": 2, "stalled": 3}
         return max((s.status for s in self.streams), key=lambda name: order[name])
+
+    @property
+    def warns(self) -> bool:
+        """``True`` when the device needs a warning marker in the status bar.
+
+        A stalled stream is the classic trigger, but a dropped BLE link
+        (``reconnecting``) or a failed one (``error``) must warn too — during
+        a reconnect no samples arrive, which naive rate math would eventually
+        read as ``idle``, hiding the problem entirely.
+        """
+
+        if self.status == "stalled":
+            return True
+        return self.connection in self.WARN_CONNECTION_STATES
 
 
 class RateTracker:
@@ -178,15 +203,29 @@ def _format_stream(health: StreamHealth) -> str:
     return f"{health.kind.value} {health.observed_hz:.0f}/{health.expected_hz:.0f} Hz"
 
 
+#: The one connection state that is the *expected* steady state while
+#: streaming; anything else is worth a visible tag in the status bar.
+_QUIET_CONNECTION = "streaming"
+
+
 def format_device_line(device: DeviceHealth) -> str:
     """One device's compact status fragment, e.g.::
 
-    left: emg 200/200 Hz, imu 50/50 Hz
+    left [reconnecting]: emg 200/200 Hz, imu 50/50 Hz
+
+    The connection state is tagged only when it is *not* the quiet default
+    (``streaming``), so the line stays short while a dropped link or a
+    device that never started is impossible to miss.
     """
 
     streams = ", ".join(_format_stream(s) for s in device.streams)
+    tag = (
+        ""
+        if device.connection in (None, _QUIET_CONNECTION)
+        else f" [{device.connection}]"
+    )
     battery = "" if device.battery is None else f", battery {device.battery}%"
-    return f"{device.label}: {streams}{battery}"
+    return f"{device.label}{tag}: {streams}{battery}"
 
 
 def format_status_line(devices: Sequence[DeviceHealth], *, dropped: int) -> str:
@@ -201,7 +240,8 @@ def format_status_line(devices: Sequence[DeviceHealth], *, dropped: int) -> str:
         return "add a simulated arm or connect a Myo"
     parts = [format_device_line(d) for d in devices]
     line = " | ".join(parts)
-    # Surface any stalled stream prominently so a dead link is not missed.
-    if any(d.status == "stalled" for d in devices):
+    # Surface stalled streams and dropped links prominently so a dead or
+    # flaky BLE connection is not missed.
+    if any(d.warns for d in devices):
         line = f"⚠ {line}"
     return f"{line} | dropped {dropped}"

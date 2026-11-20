@@ -387,6 +387,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     streams=streams,
                     dropped=0,
                     battery=self.manager.battery(key),
+                    connection=self.manager.state(key),
                 )
             )
 
