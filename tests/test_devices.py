@@ -18,7 +18,14 @@ from myopyc.devices import adapter as adapter_mod
 from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
 from myopyc.devices.simulator import SimulatedSource
-from myopyc.streams.schema import EMG_DTYPE, IMU_DTYPE, StreamKind
+from myopyc.streams.schema import (
+    EMG_DTYPE,
+    EVENT_DTYPE,
+    EVENT_TYPE_IDS,
+    IMU_DTYPE,
+    StreamKind,
+    event_type_name,
+)
 
 
 def _synth(device: str, kind: StreamKind, count: int) -> SampleBatch:
@@ -40,6 +47,56 @@ def test_simulated_source_emits_emg_and_imu_synchronously() -> None:
     finally:
         source.stop()
     assert not source.running
+
+
+def test_simulator_event_tick_fires_on_cadence() -> None:
+    """Gestures fire only once the cadence expires, then re-arm with a gap."""
+
+    info = DeviceInfo(key="left", label="Left", mac="SIM-LEFT", name="Simulated Myo")
+    batches: list[SampleBatch] = []
+    source = SimulatedSource(info, batches.append)
+    source._next_event_at = 5.0
+
+    source._tick_events(4.9)
+    assert batches == []  # before the cadence: silent
+
+    source._tick_events(5.1)
+    assert len(batches) == 1
+    batch = batches[0]
+    assert batch.kind is StreamKind.EVENT
+    assert batch.data.dtype == EVENT_DTYPE
+    assert batch.data["seq"].tolist() == [0]
+    # The pose comes from the real vocabulary (codes 1..4), payload is a
+    # plausible quaternion with a near-unit norm.
+    code = int(batch.data["type"][0])
+    assert code in set(EVENT_TYPE_IDS.values()) - {0}
+    assert event_type_name(code) != "none"
+    norm = sum(float(batch.data[f"o{axis}"][0]) ** 2 for axis in "xyzw")
+    assert 0.9 < norm < 1.1
+
+    # After firing, the next gesture is scheduled 4..10 s later: not immediate.
+    source._tick_events(5.2)
+    assert len(batches) == 1
+    next_gap = source._next_event_at - 5.1
+    assert 3.9 < next_gap < 10.1
+    assert source._event_seq == 1
+
+
+def test_simulator_events_flow_over_time() -> None:
+    """A few simulated seconds produce at least one gesture, ordered by seq."""
+
+    info = DeviceInfo(key="left", label="Left", mac="SIM-LEFT", name="Simulated Myo")
+    events: list[SampleBatch] = []
+    source = SimulatedSource(
+        info, lambda batch: events.append(batch) if batch.kind is StreamKind.EVENT else None
+    )
+    source._next_event_at = 2.0  # first gesture fires early for the test
+    for tick in range(0, 40):
+        source._tick_events(tick * 0.25)  # 10 simulated seconds
+    assert events, "10 simulated seconds must produce gestures"
+    seqs = [int(batch.data["seq"][0]) for batch in events]
+    assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
+    assert source._event_seq == len(events)
 
 
 def test_manager_streams_counts_and_state() -> None:

@@ -26,6 +26,11 @@ are recording. A stream that was flowing but then goes silent is prefixed with a
 of the status bar additionally reports accepted samples, buffered kilobytes and
 chunks written.
 
+The simulated armband also emits discrete gesture events (fist, waves, double
+click) on a random multi-second cadence. Being event-driven, they carry no rate
+expectation: the status bar shows them as `event <n> in window`, and a quiet
+window is reported as idle rather than flagged as a stall.
+
 ## Recording
 
 Press **Record** once at least one armband is streaming. Data is accepted into

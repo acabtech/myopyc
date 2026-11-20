@@ -20,6 +20,7 @@ def test_rate_tracker_states() -> None:
     """Schema rates, idle baseline, healthy steady state, degraded, stalled, reset."""
     assert expected_rate(StreamKind.EMG) == pytest.approx(200.0)
     assert expected_rate(StreamKind.IMU) == pytest.approx(50.0)
+    assert expected_rate(StreamKind.EVENT) == 0.0  # event-driven: no expectation
 
     tracker = RateTracker()
     by_kind = {s.kind: s for s in tracker.observe("left", {}, now=0.0, dt=0.0)}
@@ -120,9 +121,7 @@ def _healthy_emg_stream() -> StreamHealth:
             id="two-streams",
         ),
         pytest.param(
-            DeviceHealth(
-                key="left", label="Left", streams=(_healthy_emg_stream(),), battery=76
-            ),
+            DeviceHealth(key="left", label="Left", streams=(_healthy_emg_stream(),), battery=76),
             "Left: emg 200/200 Hz, battery 76%",
             id="battery-known",
         ),
@@ -158,9 +157,7 @@ def test_format_status_line_empty_hint() -> None:
         ),
     ],
 )
-def test_format_status_line(
-    streams: tuple[StreamHealth, ...], dropped: int, expected: str
-) -> None:
+def test_format_status_line(streams: tuple[StreamHealth, ...], dropped: int, expected: str) -> None:
     line = format_status_line(
         [DeviceHealth(key="left", label="Left", streams=streams)], dropped=dropped
     )
@@ -169,3 +166,40 @@ def test_format_status_line(
         assert "dropped 0" in line
     else:
         assert "⚠" not in line
+
+
+# ------------------------------------------------------------------ event streams
+def test_event_stream_never_stalls_or_degrades() -> None:
+    """Event-driven streams are judged by flow, not rate: sparse is normal."""
+
+    tracker = RateTracker()
+    # Prime, then a window with new events: healthy with the right delta.
+    tracker.observe("left", {StreamKind.EVENT: 1}, now=0.0, dt=1.0)
+    streams = tracker.observe("left", {StreamKind.EVENT: 3}, now=1.0, dt=1.0)
+    (event,) = [s for s in streams if s.kind is StreamKind.EVENT]
+    assert event.delta == 2
+    assert event.status == "healthy"
+    assert event.event_driven is not False  # sanity: flag is exposed
+
+    # A quiet window (no new events) reads idle, never stalled.
+    (quiet,) = [
+        s
+        for s in tracker.observe("left", {StreamKind.EVENT: 3}, now=2.0, dt=1.0)
+        if s.kind is StreamKind.EVENT
+    ]
+    assert quiet.status == "idle"
+    assert quiet.delta == 0
+
+
+def test_format_event_stream_shows_window_count() -> None:
+    """The status fragment for events is a count, not a fake 0/0 Hz rate."""
+
+    stream = StreamHealth(StreamKind.EVENT, observed_hz=2.0, expected_hz=0.0, total=3, delta=2)
+    assert format_device_line(DeviceHealth(key="left", label="Left", streams=(stream,))) == (
+        "Left: event 2 in window"
+    )
+    # Idle events (nothing in the window) still render cleanly.
+    idle = StreamHealth(StreamKind.EVENT, observed_hz=0.0, expected_hz=0.0, total=3, delta=0)
+    assert format_device_line(DeviceHealth(key="left", label="Left", streams=(idle,))) == (
+        "Left: event 0 in window"
+    )

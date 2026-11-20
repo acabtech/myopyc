@@ -10,9 +10,7 @@ import pytest
 from myopyc.cli import main
 
 
-@pytest.mark.parametrize(
-    ("flag", "value"), [("--max-seconds", "0"), ("--seconds", "-1")]
-)
+@pytest.mark.parametrize(("flag", "value"), [("--max-seconds", "0"), ("--seconds", "-1")])
 def test_record_rejects_non_positive_seconds(flag: str, value: str, tmp_path: Path, capsys) -> None:
     code = main(["record", flag, value, "--simulate", "1", "--output-dir", str(tmp_path)])
     assert code == 2

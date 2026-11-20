@@ -37,6 +37,9 @@ class StreamHealth:
     is a real rate. It is ``False`` on the first sample after start (or
     :meth:`RateTracker.reset`), where the counter is only being primed and no
     rate can be inferred yet.
+
+    ``delta`` is the raw number of samples that arrived in the window — for
+    event-driven streams it *is* the reportable figure (events, not Hz).
     """
 
     kind: StreamKind
@@ -44,6 +47,13 @@ class StreamHealth:
     expected_hz: float
     total: int
     measured: bool = True
+    delta: int = 0
+
+    @property
+    def event_driven(self) -> bool:
+        """``True`` for streams whose nominal rate is 0 (discrete events)."""
+
+        return self.expected_hz <= 0
 
     @property
     def ratio(self) -> float:
@@ -60,10 +70,16 @@ class StreamHealth:
         distinct from ``stalled``, where samples were arriving in an earlier
         window but nothing arrived now. That distinction keeps a freshly mounted
         (or just-reset) device from being flagged as a dead link.
+
+        Event-driven streams (e.g. gestures) are judged by flow, not rate:
+        events arriving in the window read ``healthy``, silence reads ``idle``
+        — never ``stalled``/``degraded``, since sparseness is normal.
         """
 
         if not self.measured or self.total <= 0:
             return "idle"
+        if self.event_driven:
+            return "healthy" if self.observed_hz > 0 else "idle"
         if self.observed_hz <= 0:
             return "stalled"
         if self.ratio < DEGRADED_RATIO:
@@ -141,6 +157,7 @@ class RateTracker:
                 delta = max(0, total - last_total)
                 observed = delta / dt
             self._prev[key] = (total, now)
+            delta = max(0, total - last_total) if prev is not None else 0
             results.append(
                 StreamHealth(
                     kind=kind,
@@ -148,12 +165,16 @@ class RateTracker:
                     expected_hz=expected_rate(kind),
                     total=total,
                     measured=measured,
+                    delta=delta,
                 )
             )
         return tuple(results)
 
 
 def _format_stream(health: StreamHealth) -> str:
+    if health.event_driven:
+        # Discrete events carry no rate expectation; show the window count.
+        return f"{health.kind.value} {health.delta} in window"
     return f"{health.kind.value} {health.observed_hz:.0f}/{health.expected_hz:.0f} Hz"
 
 

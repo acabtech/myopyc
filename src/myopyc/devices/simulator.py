@@ -10,7 +10,13 @@ from collections.abc import Callable
 import numpy as np
 
 from myopyc.devices.model import DeviceInfo, SampleBatch
-from myopyc.streams.schema import EMG_CHANNELS, EMG_DTYPE, IMU_DTYPE, StreamKind
+from myopyc.streams.schema import (
+    EMG_CHANNELS,
+    EMG_DTYPE,
+    EVENT_DTYPE,
+    IMU_DTYPE,
+    StreamKind,
+)
 
 EmitFn = Callable[[SampleBatch], None]
 StatusFn = Callable[[str, str, str | None], None]
@@ -42,8 +48,13 @@ class SimulatedSource:
         self._thread: threading.Thread | None = None
         self._emg_seq = 0
         self._imu_seq = 0
+        self._event_seq = 0
         self._started_at = 0.0
         self._phase = float(seed % 7) * 0.7
+        # Gesture cadence: the next simulated gesture fires somewhere in
+        # 2..6 s after start, then every ~4..10 s after the previous one —
+        # slow enough to look like a human posing, fast enough to demo.
+        self._next_event_at = float(self._rng.uniform(2.0, 6.0))
         # Simulated charge: starts somewhere in 55..95 % and drains ~1 % per
         # second of wall time, bottoming out at 15 % — fast enough to watch the
         # low-battery UI path in a demo, slow enough to stay plausible.
@@ -87,6 +98,7 @@ class SimulatedSource:
             elapsed = now - self._started_at
             self._emit(self._make_emg(elapsed, emg_per_block))
             self._tick_battery(elapsed)
+            self._tick_events(elapsed)
             for _ in range(imu_per_block):
                 self._emit(self._make_imu(elapsed))
             next_tick += self.block_seconds
@@ -121,8 +133,35 @@ class SimulatedSource:
         self._emg_seq += count
         return SampleBatch(self.info.key, StreamKind.EMG, rows)
 
-    def _make_imu(self, elapsed: float) -> SampleBatch:
-        row = np.empty(1, dtype=IMU_DTYPE)
+    def _make_event(self, elapsed: float) -> SampleBatch:
+        """One discrete gesture/pose event at ``elapsed`` seconds.
+
+        The pose is picked from the real Myo vocabulary (fist, waves,
+        double click) and the orientation payload mirrors the IMU
+        quaternion at that instant, so recorded events can be correlated
+        with the IMU stream.
+        """
+
+        row = np.empty(1, dtype=EVENT_DTYPE)
+        row["t_ns"] = time.monotonic_ns()
+        row["seq"] = self._event_seq
+        row["type"] = int(self._rng.integers(1, 5))  # fist..double_click
+        # Orientation payload: the IMU quaternion model at this instant.
+        row["ow"], row["ox"], row["oy"], row["oz"] = self._orientation(elapsed)
+        self._event_seq += 1
+        return SampleBatch(self.info.key, StreamKind.EVENT, row)
+
+    def _tick_events(self, elapsed: float) -> None:
+        """Emit the next gesture once the simulated cadence expires."""
+
+        if elapsed < self._next_event_at:
+            return
+        self._emit(self._make_event(elapsed))
+        self._next_event_at = elapsed + float(self._rng.uniform(4.0, 10.0))
+
+    def _orientation(self, elapsed: float) -> tuple[float, float, float, float]:
+        """Slow, plausible (qw, qx, qy, qz) drift at ``elapsed`` seconds."""
+
         roll = 0.35 * math.sin(elapsed * 1.1 + self._phase)
         pitch = 0.25 * math.sin(elapsed * 0.7)
         yaw = 0.15 * math.sin(elapsed * 0.3)
@@ -133,7 +172,11 @@ class SimulatedSource:
         qx = sr * cp * cy - cr * sp * sy
         qy = cr * sp * cy + sr * cp * sy
         qz = cr * cp * sy - sr * sp * cy
+        return qw, qx, qy, qz
 
+    def _make_imu(self, elapsed: float) -> SampleBatch:
+        row = np.empty(1, dtype=IMU_DTYPE)
+        qw, qx, qy, qz = self._orientation(elapsed)
         row["t_ns"] = time.monotonic_ns()
         row["seq"] = self._imu_seq
         row["qw"], row["qx"], row["qy"], row["qz"] = qw, qx, qy, qz
