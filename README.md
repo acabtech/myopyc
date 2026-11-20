@@ -94,7 +94,9 @@ Each session is a self-contained directory:
 index, sample counts, dropped samples and every gap. EMG chunks are structured
 arrays with host monotonic timestamps (`t_ns`), a per-stream sequence counter
 and eight raw channels; IMU chunks add a quaternion plus accelerometer and
-gyroscope. Read them with:
+gyroscope. The full on-disk format — chunk dtypes, `t_ns` semantics, gap
+encoding and the append-only evolution contract — is specified in
+[docs/data-format.md](docs/data-format.md). Read the data with:
 
 ```python
 from myopyc.recorder import load_session

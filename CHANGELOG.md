@@ -42,6 +42,10 @@ Keep a Changelog and the project uses semantic versioning.
 - `inspect --json` emits a single machine-readable JSON object (safe to pipe into
   `jq`); `--repair` and `--arrays` fold their data into the same object rather
   than printing extra lines.
+- Data-format specification ([docs/data-format.md](docs/data-format.md)): session
+  layout, manifest field reference, EMG/IMU chunk dtypes, `t_ns` semantics
+  (host-monotonic BLE receive time), gap/overflow encoding, crash-repair
+  behaviour, and the append-only v1 evolution contract.
 - Linux setup and usage documentation.
 - Version single-source check test asserting `__version__`, `pyproject.toml`, and the
   latest `CHANGELOG.md` heading stay identical.

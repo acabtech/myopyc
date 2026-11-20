@@ -136,6 +136,13 @@ suitable for ordering and per-device timing, and for best-effort alignment
 between two armbands; they are not a hardware-synchronised clock. The manifest
 lists every chunk and gap so a reader can reconstruct the timeline exactly.
 
+## Data format
+
+The complete on-disk specification — chunk dtypes, `t_ns` semantics, gap
+encoding and the append-only evolution contract — lives in
+[data-format.md](data-format.md). It is normative for anything that reads or
+writes a session directory.
+
 ## Data format compatibility
 
 Sessions are identified by `format: "myopyc.session"` and `format_version: 1`.
