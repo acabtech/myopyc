@@ -61,6 +61,11 @@ class SimulatedSource:
         self._thread.start()
         self._status(self.info.key, "streaming", "simulated")
         self._battery(self.info.key, self._battery_level)
+        # Emit the first block synchronously so callers (tests, UI) observe both
+        # streams immediately, without waiting for the thread's first real tick.
+        self._emit(self._make_emg(0.0, int(self.emg_rate_hz * self.block_seconds)))
+        for _ in range(max(1, int(self.imu_rate_hz * self.block_seconds))):
+            self._emit(self._make_imu(0.0))
 
     def stop(self) -> None:
         self._stop.set()

@@ -294,6 +294,7 @@ _CRASH_SCRIPT = textwrap.dedent(
     not hasattr(signal, "SIGKILL") or sys.platform == "win32",
     reason="requires SIGKILL",
 )
+@pytest.mark.slow
 def test_sigkill_mid_flush_leaves_recoverable_state(tmp_path: Path) -> None:
     # First build a clean two-flush-free baseline via the recorder so the
     # manifest is well-formed, then kill a real process mid second flush.

@@ -50,6 +50,9 @@ packages = ["src/myopyc"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers --cov=myopyc --cov-report=term-missing --cov-fail-under=70"
+markers = [
+    "slow: process-bound crash-safety tests (deselect with -m 'not slow')",
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,43 +1,62 @@
+"""Device manager tests, driven deterministically without real-time waits.
+
+The simulator emits its first block and battery reading *synchronously* inside
+:meth:`SimulatedSource.start`, so no sleeping is needed. State/counts/battery
+paths that depend on stream callbacks are exercised by emitting synthetic
+batches directly through :meth:`DeviceManager._emit`, keeping the suite fast.
+"""
+
 from __future__ import annotations
 
-import time
+import numpy as np
 
 from myopyc.devices.manager import DeviceManager
-from myopyc.devices.model import SampleBatch
-from myopyc.streams.schema import StreamKind
+from myopyc.devices.model import DeviceInfo, SampleBatch
+from myopyc.devices.simulator import SimulatedSource
+from myopyc.streams.schema import EMG_DTYPE, IMU_DTYPE, StreamKind
 
 
-def _wait_until(predicate, timeout: float = 3.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.02)
-    return False
+def _synth(device: str, kind: StreamKind, count: int) -> SampleBatch:
+    rows = np.zeros(count, dtype=EMG_DTYPE if kind is StreamKind.EMG else IMU_DTYPE)
+    rows["seq"] = np.arange(count)
+    return SampleBatch(device, kind, rows)
 
 
-def test_simulated_device_streams_emg_and_imu() -> None:
+def test_simulated_source_emits_emg_and_imu_synchronously() -> None:
+    """The simulator's first tick produces both streams without waiting."""
+    info = DeviceInfo(key="left", label="Left", mac="SIM-LEFT", name="Simulated Myo")
+    batches: list[SampleBatch] = []
+    source = SimulatedSource(info, batches.append)
+    source.start()
+    try:
+        kinds = {batch.kind for batch in batches}
+        assert kinds == {StreamKind.EMG, StreamKind.IMU}
+        assert source.running
+    finally:
+        source.stop()
+    assert not source.running
+
+
+def test_manager_streams_counts_and_state() -> None:
+    """State transitions and per-stream counts work without live threads."""
     manager = DeviceManager()
     batches: list[SampleBatch] = []
     manager.subscribe(batches.append)
     info = manager.add_simulated("Left")
-    manager.start_all()
-    try:
-        assert _wait_until(
-            lambda: (
-                any(batch.kind is StreamKind.EMG for batch in batches)
-                and any(batch.kind is StreamKind.IMU for batch in batches)
-            )
-        )
-        assert manager.state(info.key) == "streaming"
-        counts = manager.counts(info.key)
-        assert counts[StreamKind.EMG] > 0
-        assert counts[StreamKind.IMU] > 0
-    finally:
-        manager.stop_all()
 
-    assert manager.state(info.key) == "stopped"
+    manager._emit(_synth(info.key, StreamKind.EMG, 4))
+    manager._emit(_synth(info.key, StreamKind.IMU, 2))
+    counts = manager.counts(info.key)
+    assert counts[StreamKind.EMG] == 4
+    assert counts[StreamKind.IMU] == 2
+
+    manager._on_status(info.key, "streaming", None)
+    assert manager.state(info.key) == "streaming"
     assert manager.meta()[info.key]["label"] == "Left"
+
+    manager.stop_all()
+    manager._on_status(info.key, "stopped", None)
+    assert manager.state(info.key) == "stopped"
 
 
 def test_two_devices_and_limit() -> None:
@@ -60,7 +79,7 @@ def test_battery_reported_and_cleared_on_remove() -> None:
     info = manager.add_simulated("Left")
     manager.start_all()
     try:
-        assert _wait_until(lambda: manager.battery(info.key) is not None)
+        # start() reports the initial battery synchronously (no drain-wait).
         level = manager.battery(info.key)
         assert level is not None and 15 <= level <= 95
     finally:

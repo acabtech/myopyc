@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from myopyc.cli import main
-
-
 import pytest
+
+from myopyc.cli import main
 
 
 @pytest.mark.parametrize(

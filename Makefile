@@ -1,4 +1,4 @@
-.PHONY: install run test lint format build clean
+.PHONY: install run test test-fast test-all lint format build clean
 
 PYTHON ?= uv run python
 
@@ -13,6 +13,15 @@ record-demo:
 
 test:
 	uv run pytest
+
+# Fast lane: no coverage instrumentation, no process-bound crash tests.
+# Use for tight local loops; `make test` remains the authoritative gate.
+test-fast:
+	uv run pytest -m "not slow" --no-cov
+
+test-all:
+	uv run pytest
+	uv run pytest -m slow --no-cov
 
 lint:
 	uv run ruff check .
