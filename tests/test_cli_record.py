@@ -21,9 +21,17 @@ def test_record_rejects_non_positive_seconds(flag: str, value: str, tmp_path: Pa
 
 
 def test_record_accepts_max_seconds_flag(tmp_path: Path, capsys, monkeypatch) -> None:
-    # Avoid long sleeps: make the timer expire immediately.
-    ticks = iter([0.0, 1.0])
-    monkeypatch.setattr("myopyc.cli.time.monotonic", lambda: next(ticks, 1.0))
+    # Avoid long sleeps: a strictly increasing fake clock means the recording
+    # deadline can never survive a second loop check, regardless of how many
+    # calls the simulator/manager consume before the deadline is computed.
+    calls = {"n": 0}
+
+    def fake_monotonic() -> float:
+        value = float(calls["n"])
+        calls["n"] += 1
+        return value
+
+    monkeypatch.setattr("myopyc.cli.time.monotonic", fake_monotonic)
     monkeypatch.setattr("myopyc.cli.time.sleep", lambda _s: None)
 
     code = main(
@@ -40,6 +48,8 @@ def test_record_accepts_max_seconds_flag(tmp_path: Path, capsys, monkeypatch) ->
     assert code == 0
     out = capsys.readouterr().out
     assert "recording 0.5s to" in out
-    # Final line is the session summary JSON.
-    summary = json.loads(out[out.rfind("{") :])
+    # The summary JSON is pretty-printed after the human lines: raw-decode the
+    # first object that starts after the "recording ..." line.
+    summary_start = out.index("{")
+    summary, _ = json.JSONDecoder().raw_decode(out[summary_start:])
     assert summary["status"] == "stopped"

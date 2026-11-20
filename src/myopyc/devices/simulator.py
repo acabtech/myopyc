@@ -91,9 +91,13 @@ class SimulatedSource:
                 self._emit(self._make_imu(elapsed))
             next_tick += self.block_seconds
             delay = next_tick - time.monotonic()
+            # A non-positive delay would tight-spin the loop (burning CPU and
+            # emitting unbounded data). Cap the catch-up step with a small
+            # real sleep so a stalled/fake clock cannot spin forever.
             if delay > 0:
                 self._stop.wait(delay)
             else:
+                self._stop.wait(0.01)
                 next_tick = time.monotonic()
 
     def _make_emg(self, elapsed: float, count: int) -> SampleBatch:

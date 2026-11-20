@@ -16,21 +16,16 @@ from myopyc.streams.health import (
 from myopyc.streams.schema import StreamKind
 
 
-def test_expected_rate_matches_schema() -> None:
+def test_rate_tracker_states() -> None:
+    """Schema rates, idle baseline, healthy steady state, degraded, stalled, reset."""
     assert expected_rate(StreamKind.EMG) == pytest.approx(200.0)
     assert expected_rate(StreamKind.IMU) == pytest.approx(50.0)
 
-
-def test_first_observe_is_idle() -> None:
     tracker = RateTracker()
-    streams = tracker.observe("left", {}, now=0.0, dt=0.0)
-    by_kind = {s.kind: s for s in streams}
+    by_kind = {s.kind: s for s in tracker.observe("left", {}, now=0.0, dt=0.0)}
     assert by_kind[StreamKind.EMG].status == "idle"
     assert by_kind[StreamKind.EMG].observed_hz == 0.0
 
-
-def test_steady_rate_is_healthy() -> None:
-    tracker = RateTracker()
     # Prime: first window establishes the baseline total.
     tracker.observe("left", {StreamKind.EMG: 200, StreamKind.IMU: 50}, now=0.0, dt=1.0)
     streams = tracker.observe("left", {StreamKind.EMG: 400, StreamKind.IMU: 100}, now=1.0, dt=1.0)
@@ -38,6 +33,26 @@ def test_steady_rate_is_healthy() -> None:
     assert by_kind[StreamKind.EMG].observed_hz == pytest.approx(200.0)
     assert by_kind[StreamKind.EMG].status == "healthy"
     assert by_kind[StreamKind.IMU].status == "healthy"
+
+    emg_tracker = RateTracker(kinds=(StreamKind.EMG,))
+    expected = int(expected_rate(StreamKind.EMG))
+    half = int(expected * (DEGRADED_RATIO / 2))
+    emg_tracker.observe("left", {StreamKind.EMG: expected}, now=0.0, dt=1.0)
+    (stream,) = emg_tracker.observe("left", {StreamKind.EMG: expected + half}, now=1.0, dt=1.0)
+    assert stream.status == "degraded"
+
+    stall = RateTracker(kinds=(StreamKind.EMG,))
+    stall.observe("left", {StreamKind.EMG: expected}, now=0.0, dt=1.0)
+    (stream,) = stall.observe("left", {StreamKind.EMG: expected}, now=1.0, dt=1.0)
+    assert stream.status == "stalled"
+    assert stream.total == expected  # cumulative count is retained
+
+    reset = RateTracker(kinds=(StreamKind.EMG,))
+    reset.observe("left", {StreamKind.EMG: 100}, now=0.0, dt=1.0)
+    reset.reset("left")
+    (stream,) = reset.observe("left", {StreamKind.EMG: 100}, now=1.0, dt=1.0)
+    # With history cleared the device looks idle again (baseline re-established).
+    assert stream.status == "idle"
 
 
 def _emg_only_tracker() -> RateTracker:
@@ -71,12 +86,11 @@ def test_reset_clears_history() -> None:
     assert stream.status == "idle"
 
 
-def test_stream_health_ratio_guard() -> None:
+def test_health_object_guards() -> None:
+    """Ratio guard for zero expectations and worst-of-streams device status."""
     zero = StreamHealth(StreamKind.EMG, observed_hz=0.0, expected_hz=0.0, total=5)
     assert zero.ratio == 0.0
 
-
-def test_device_status_worst_of_streams() -> None:
     streams = (
         StreamHealth(StreamKind.EMG, observed_hz=200.0, expected_hz=200.0, total=200),
         StreamHealth(StreamKind.IMU, observed_hz=0.0, expected_hz=50.0, total=50),
@@ -147,7 +161,9 @@ def test_format_status_line_empty_hint() -> None:
 def test_format_status_line(
     streams: tuple[StreamHealth, ...], dropped: int, expected: str
 ) -> None:
-    line = format_status_line([DeviceHealth(key="left", label="Left", streams=streams)], dropped)
+    line = format_status_line(
+        [DeviceHealth(key="left", label="Left", streams=streams)], dropped=dropped
+    )
     assert line == expected
     if expected.startswith("⚠"):
         assert "dropped 0" in line

@@ -1,9 +1,9 @@
-"""Offscreen smoke test for the status-bar stream-health wiring.
+"""Headless (offscreen) smoke tests for the Qt wiring.
 
-Run headlessly (CI sets ``QT_QPA_PLATFORM=offscreen``); skipped if PySide6 or
-pyqtgraph cannot be imported. This exercises the thin GUI glue in
-:meth:`MainWindow.refresh_health`, while the rate math itself is covered
-purely in ``tests/test_health.py``.
+Covers the status-bar stream-health glue (:meth:`MainWindow.refresh_health`)
+and the configured plot-window durations. The rate math itself is covered
+purely in ``tests/test_health.py``. Skipped if PySide6/pyqtgraph are missing;
+CI sets ``QT_QPA_PLATFORM=offscreen``.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pyqtgraph")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
 from PySide6 import QtWidgets
 
 from myopyc.config import AppConfig
@@ -34,16 +35,12 @@ def qapp() -> QtWidgets.QApplication:
 
 
 def _emg(device: str, count: int) -> SampleBatch:
-    import numpy as np
-
     rows = np.zeros(count, dtype=EMG_DTYPE)
     rows["seq"] = np.arange(count)
     return SampleBatch(device, StreamKind.EMG, rows)
 
 
 def _imu(device: str, count: int) -> SampleBatch:
-    import numpy as np
-
     rows = np.zeros(count, dtype=IMU_DTYPE)
     rows["seq"] = np.arange(count)
     return SampleBatch(device, StreamKind.IMU, rows)
@@ -57,6 +54,12 @@ def _config() -> AppConfig:
     return config
 
 
+def _close(window: MainWindow) -> None:
+    window.manager.stop_all()
+    window._health_timer.stop()
+    window._timer.stop()
+
+
 def test_status_bar_has_permanent_health_widget(qapp: QtWidgets.QApplication) -> None:
     window = MainWindow(_config(), simulate=0)
     try:
@@ -64,9 +67,7 @@ def test_status_bar_has_permanent_health_widget(qapp: QtWidgets.QApplication) ->
         # It is added as a permanent widget so transient messages do not hide it.
         assert window._status_label in window.statusBar().children()
     finally:
-        window.manager.stop_all()
-        window._health_timer.stop()
-        window._timer.stop()
+        _close(window)
 
 
 def test_idle_hint_when_no_devices(qapp: QtWidgets.QApplication) -> None:
@@ -77,9 +78,7 @@ def test_idle_hint_when_no_devices(qapp: QtWidgets.QApplication) -> None:
         assert line == "add a simulated arm or connect a Myo"
         assert window._status_label.text() == line
     finally:
-        window.manager.stop_all()
-        window._health_timer.stop()
-        window._timer.stop()
+        _close(window)
 
 
 def test_refresh_reports_rates_and_drops(
@@ -110,6 +109,35 @@ def test_refresh_reports_rates_and_drops(
         assert "⚠" not in second
         assert window._status_label.text() == second
     finally:
-        window.manager.stop_all()
-        window._health_timer.stop()
-        window._timer.stop()
+        _close(window)
+
+
+@pytest.mark.parametrize(
+    ("emg_window_s", "imu_window_s", "expected_emg", "expected_imu"),
+    [
+        pytest.param(3.5, 6.0, 3.5, 6.0, id="configured"),
+        pytest.param(None, None, 2.0, 4.0, id="defaults"),
+    ],
+)
+def test_device_view_window_durations(
+    qapp: QtWidgets.QApplication,
+    emg_window_s: float | None,
+    imu_window_s: float | None,
+    expected_emg: float,
+    expected_imu: float,
+) -> None:
+    """Config.ui plot-window settings are honored; defaults apply otherwise."""
+    config = _config()
+    if emg_window_s is not None:
+        config.ui.emg_window_s = emg_window_s
+    if imu_window_s is not None:
+        config.ui.imu_window_s = imu_window_s
+    window = MainWindow(config, simulate=0)
+    try:
+        info = window.manager.add_simulated("Left")
+        window._mount_view(info)
+        view = window._views[info.key]
+        assert view.emg.window_s == expected_emg
+        assert view.imu.window_s == expected_imu
+    finally:
+        _close(window)

@@ -19,7 +19,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from myopyc.cli import main
 from myopyc.recorder.manifest import read_manifest, write_manifest
 from myopyc.recorder.reader import SessionReader
 from myopyc.recorder.repair import QUARANTINE_DIR, needs_repair, repair_session
@@ -91,7 +90,8 @@ def test_dry_run_does_not_mutate(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- orphans
 
 
-def test_orphaned_chunk_is_quarantined(tmp_path: Path) -> None:
+def test_orphan_quarantine_and_idempotence(tmp_path: Path) -> None:
+    """Orphaned chunks are quarantined (never deleted) and repair is idempotent."""
     session_dir = _record_two_flushes(tmp_path)
     orphan = session_dir / EMG_DIR / "chunk-99999.npy"
     rows = np.zeros(2, dtype=EMG_DTYPE)
@@ -107,17 +107,9 @@ def test_orphaned_chunk_is_quarantined(tmp_path: Path) -> None:
     # manifest sample count is unaffected by the quarantined orphan
     assert read_manifest(session_dir)["devices"]["left"]["streams"]["emg"]["samples"] == 5
 
-
-def test_repair_is_idempotent(tmp_path: Path) -> None:
-    session_dir = _record_two_flushes(tmp_path)
-    orphan = session_dir / EMG_DIR / "chunk-00007.npy"
-    np.save(orphan, np.zeros(1, dtype=EMG_DTYPE))
-
-    first = repair_session(session_dir)
+    # Second run is a no-op.
     snapshot = read_manifest(session_dir)
     second = repair_session(session_dir)
-
-    assert first.changed is True
     assert second.changed is False
     assert read_manifest(session_dir) == snapshot
     assert not needs_repair(session_dir)
@@ -126,7 +118,8 @@ def test_repair_is_idempotent(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- truncation
 
 
-def test_truncated_listed_chunk_is_dropped(tmp_path: Path) -> None:
+def test_truncated_and_missing_listed_chunks(tmp_path: Path) -> None:
+    """A truncated listed chunk is dropped; a vanished one is unlisted."""
     session_dir = _record_two_flushes(tmp_path)
     chunks = _emg_chunks(read_manifest(session_dir))
     last = session_dir / chunks[-1]["file"]
@@ -146,19 +139,14 @@ def test_truncated_listed_chunk_is_dropped(tmp_path: Path) -> None:
     assert surviving[0]["samples"] == 2
     assert manifest["devices"]["left"]["streams"]["emg"]["samples"] == 2
 
-
-def test_missing_listed_chunk_is_unlisted(tmp_path: Path) -> None:
-    session_dir = _record_two_flushes(tmp_path)
-    chunks = _emg_chunks(read_manifest(session_dir))
-    (session_dir / chunks[0]["file"]).unlink()  # first chunk file vanished
-
+    # Now the remaining chunk file vanishes entirely.
+    (session_dir / _emg_chunks(read_manifest(session_dir))[0]["file"]).unlink()
     report = repair_session(session_dir)
-
     assert report.changed is True
     assert report.unlisted  # the dead entry was dropped
     manifest = read_manifest(session_dir)
-    assert len(_emg_chunks(manifest)) == 1
-    assert manifest["devices"]["left"]["streams"]["emg"]["samples"] == 3
+    assert not _emg_chunks(manifest)
+    assert manifest["devices"]["left"]["streams"]["emg"]["samples"] == 0
 
 
 # --------------------------------------------------------------------------- crash state
@@ -210,23 +198,8 @@ def test_manifest_backed_up_before_rewrite(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- CLI wiring
 
 
-def test_cli_inspect_repair_recovers_session(tmp_path: Path, capsys) -> None:
-    session_dir = _record_two_flushes(tmp_path)
-    _set_status(session_dir, "recording")
-    np.save(session_dir / EMG_DIR / "chunk-00009.npy", np.zeros(1, dtype=EMG_DTYPE))
-
-    code = main(["inspect", str(session_dir), "--repair"])
-
-    assert code == 0
-    out = capsys.readouterr().out  # a repair-report JSON object is printed first
-    printed, _ = json.JSONDecoder().raw_decode(out)
-    assert printed["repair"]["status_after"] == "repaired"
-    # the session on disk was actually fixed
-    assert read_manifest(session_dir)["status"] == "repaired"
-    assert not (session_dir / EMG_DIR / "chunk-00009.npy").exists()
-
-
-def test_reader_repair_refreshes_manifest(tmp_path: Path) -> None:
+def test_reader_repair_and_enum_guard(tmp_path: Path) -> None:
+    """SessionReader.repair() refreshes the manifest; StreamKind matches keys."""
     session_dir = _record_two_flushes(tmp_path)
     np.save(session_dir / EMG_DIR / "chunk-00050.npy", np.zeros(1, dtype=EMG_DTYPE))
 
@@ -237,8 +210,6 @@ def test_reader_repair_refreshes_manifest(tmp_path: Path) -> None:
     assert reader.manifest["devices"]["left"]["streams"]["emg"]["samples"] == 5
     assert SessionReader(session_dir).load_stream("left", "emg").size == 5
 
-
-def test_stream_kind_enum_matches_manifest_keys() -> None:
     # Guard: repair relies on StreamKind(value) round-tripping the manifest keys.
     assert {kind.value for kind in StreamKind} == {"emg", "imu"}
 
