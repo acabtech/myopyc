@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 Keep a Changelog and the project uses semantic versioning.
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-11-20
 
 ### Added
 
@@ -79,3 +79,12 @@ Keep a Changelog and the project uses semantic versioning.
 - Data-format append-only contract encoded explicitly: readers tolerate unknown
   optional manifest fields and unknown stream kinds (keeping `FORMAT_VERSION` at 1
   for additive evolution), with forward-compatibility tests and usage docs.
+
+### Known limitations
+
+- The 30-minute dual-Myo hardware soak test is pending; it will validate BLE
+  link stability over long captures before/shortly after this tag. Crash-safe
+  session repair (`myopyc inspect --repair`) mitigates interrupted recordings
+  in the meantime.
+- BLE disconnect/reconnect handling is documented for the next patch release
+  (0.1.x).
