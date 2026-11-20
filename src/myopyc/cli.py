@@ -2,9 +2,10 @@
 
 Subcommands::
 
-    myopyc                       # GUI with one simulated armband
+    myopyc                       # GUI with no devices (add via --simulate/--ble)
     myopyc gui --simulate 2
     myopyc gui --ble D2:3B:85:94:32:8E=Left
+    myopyc devices               # scan, pick armband(s) from a list, stream
     myopyc record --seconds 10 --simulate 2
     myopyc inspect <session-dir>
     myopyc sessions
@@ -41,9 +42,9 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--simulate",
         type=int,
-        default=1,
+        default=0,
         metavar="N",
-        help="number of simulated armbands (0-2, default: 1)",
+        help="number of simulated armbands (0-2, default: 0)",
     )
     parser.add_argument(
         "--ble",
@@ -90,6 +91,117 @@ def _cmd_gui(args: argparse.Namespace) -> int:
         return 130
 
 
+def _cmd_devices(args: argparse.Namespace) -> int:
+    """Scan, show a numbered list, connect the pick(s) and persist bindings."""
+    from myopyc.devices.manager import DeviceManager
+
+    config = load_config()
+    picked = _interactive_device_picker(config)
+    if not picked:
+        return 2
+    manager = DeviceManager()
+    for mac, label in picked:
+        manager.add_ble(mac, label)
+        config.add_or_update_binding(mac, label, slot=len(config.devices))
+        print(f"connected {label} ({mac})", flush=True)
+    try:
+        from myopyc.config import save_config
+
+        save_config(config)
+        print("bindings saved", flush=True)
+    except OSError:
+        logging.exception("could not persist device bindings")
+    # Keep streaming until Ctrl-C so the user can verify the armbands work.
+    print("streaming until Ctrl-C…", flush=True)
+    try:
+        manager.start_all()
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print()
+    finally:
+        manager.stop_all()
+    return 0
+
+
+def _interactive_device_picker(config) -> list[tuple[str, str]] | None:
+    """Scan for armbands and prompt for a numbered-list pick on the terminal."""
+    import asyncio
+
+    from myopyc.devices.discovery import discover_myos, release_bluez_connection
+
+    print("scanning for Myo armbands…", flush=True)
+    from myopyc.devices.discovery import merge_saved_bindings
+
+    found = merge_saved_bindings(
+        asyncio.run(discover_myos()),
+        {b.mac: b.label for b in config.devices},
+    )
+    if not found:
+        print(
+            "no Myo armbands found. Wake the armband (move it around) "
+            "and try again, or pass --ble MAC:LABEL.",
+            file=sys.stderr,
+        )
+        return None
+    print("available Myo armbands:", flush=True)
+    for index, entry in enumerate(found, start=1):
+        binding = config.binding_for_mac(entry.mac)
+        bound = f", saved as {binding.label}" if binding else ""
+        if entry.connected:
+            state = "OS-connected"
+        elif entry.remembered:
+            state = "remembered (wake it to connect)"
+        else:
+            state = "advertising"
+        print(f"  [{index}] {entry.name}  {entry.mac}  ({state}{bound})", flush=True)
+    while True:
+        try:
+            raw = input("pick armband(s), e.g. '1' or '1 2' (empty = cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if not raw:
+            return None
+        try:
+            picks = [found[int(token) - 1] for token in raw.split()]
+        except (ValueError, IndexError):
+            print("invalid selection; enter numbers between 1 and", len(found), flush=True)
+            continue
+        devices: list[tuple[str, str]] = []
+        for entry in picks:
+            if entry.connected:
+                asyncio.run(release_bluez_connection(entry.mac))
+                time.sleep(2.0)
+            binding = config.binding_for_mac(entry.mac)
+            label = binding.label if binding else ("Left", "Right")[len(devices)]
+            devices.append((entry.mac, label))
+        return devices
+
+
+def _discover_ble_devices(config) -> list[tuple[str, str]]:
+    """Probe for Myo armbands; release OS-held connections so we can connect.
+
+    Used when neither ``--simulate`` nor ``--ble`` is given so a plain
+    ``myopyc record`` streams from whatever armband is reachable. Saved
+    bindings supply labels; unbound armbands get Left/Right.
+    """
+    import asyncio
+
+    from myopyc.devices.discovery import discover_myos, release_bluez_connection
+
+    found = asyncio.run(discover_myos())
+    devices: list[tuple[str, str]] = []
+    for index, entry in enumerate(found):
+        if entry.connected:
+            asyncio.run(release_bluez_connection(entry.mac))
+            time.sleep(2.0)
+        binding = config.binding_for_mac(entry.mac)
+        label = binding.label if binding else ("Left", "Right")[index % 2]
+        devices.append((entry.mac, label))
+    return devices
+
+
 def _cmd_record(args: argparse.Namespace) -> int:
     from myopyc.devices.manager import DeviceManager
     from myopyc.recorder.reader import SessionReader
@@ -100,9 +212,19 @@ def _cmd_record(args: argparse.Namespace) -> int:
     flush_interval = args.flush_interval or config.recorder.flush_interval_s
 
     manager = DeviceManager()
+    ble = _parse_ble(args.ble)
+    if not args.simulate and not ble and sys.stdin.isatty():
+        # Plain interactive run: scan and let the user pick from a list.
+        ble = _interactive_device_picker(config)
+        if ble is None:
+            print("no device selected; use --simulate or --ble to skip the picker", file=sys.stderr)
+            return 2
+    elif not args.simulate and not ble:
+        # Non-interactive: auto-connect whatever is reachable.
+        ble = _discover_ble_devices(config)
     for _ in range(min(args.simulate, 2)):
         manager.add_simulated()
-    for mac, label in _parse_ble(args.ble):
+    for mac, label in ble:
         manager.add_ble(mac, label)
     if not manager.keys:
         print("nothing to record: pass --simulate or --ble", file=sys.stderr)
@@ -269,6 +391,9 @@ def build_parser() -> argparse.ArgumentParser:
     sessions = sub.add_parser("sessions", help="list recorded sessions")
     sessions.add_argument("--output-dir", type=Path, default=None)
     sessions.set_defaults(func=_cmd_sessions)
+
+    devices = sub.add_parser("devices", help="scan for Myo armbands and save bindings for a pick")
+    devices.set_defaults(func=_cmd_devices)
     return parser
 
 
@@ -276,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "func", None) is None:
-        # Default to the GUI with one simulated armband so first run shows something.
+        # Default to the GUI; devices come from --simulate/--ble or saved bindings.
         args = parser.parse_args(["gui", *(argv or [])])
     _setup_logging(getattr(args, "debug", False))
     return int(args.func(args))

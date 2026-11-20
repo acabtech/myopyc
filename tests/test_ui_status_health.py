@@ -34,6 +34,17 @@ def qapp() -> QtWidgets.QApplication:
     return app
 
 
+@pytest.fixture(autouse=True)
+def no_ble_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep MainWindow from probing real Bluetooth hardware in tests.
+
+    The constructor spawns an auto-discovery thread when dl-myo is
+    importable; its status callbacks race the monkeypatched clock used by
+    the health-refresh test (StopIteration) and touch live hardware.
+    """
+    monkeypatch.setattr("myopyc.ui.main_window.dl_myo_available", lambda: False)
+
+
 def _emg(device: str, count: int) -> SampleBatch:
     rows = np.zeros(count, dtype=EMG_DTYPE)
     rows["seq"] = np.arange(count)

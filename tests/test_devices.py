@@ -247,3 +247,21 @@ def test_adapter_battery_loop_reports_level(monkeypatch: pytest.MonkeyPatch) -> 
     with contextlib.suppress(_StopLoop):
         asyncio.run(source2._battery_loop(DeadClient()))
     assert silent == {}
+
+
+def test_merge_saved_bindings_adds_remembered_and_dedupes() -> None:
+    from myopyc.devices.discovery import DiscoveredMyo, merge_saved_bindings
+
+    # Nothing discovered: saved bindings still show up, flagged as remembered.
+    merged = merge_saved_bindings([], {"EB:A0:71:06:1D:FD": "Right"})
+    assert len(merged) == 1
+    assert merged[0].mac == "EB:A0:71:06:1D:FD"
+    assert merged[0].name == "Right"
+    assert merged[0].remembered is True
+
+    # Discovered devices win; saved bindings for them must not duplicate.
+    seen = [DiscoveredMyo("EB:A0:71:06:1D:FD", "Sam's Myo", False)]
+    merged = merge_saved_bindings(seen, {"EB:A0:71:06:1D:FD": "Right"})
+    assert len(merged) == 1
+    assert merged[0].name == "Sam's Myo"
+    assert merged[0].remembered is False

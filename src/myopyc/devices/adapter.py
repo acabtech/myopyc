@@ -16,6 +16,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from myopyc.devices.discovery import release_bluez_connection
 from myopyc.devices.model import DeviceInfo, SampleBatch
 from myopyc.streams.schema import EMG_DTYPE, IMU_DTYPE, StreamKind
 
@@ -59,6 +60,7 @@ class DlMyoSource:
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event: asyncio.Event | None = None
+        self._stop_requested = False
         self._emg_seq = 0
         self._imu_seq = 0
 
@@ -66,12 +68,14 @@ class DlMyoSource:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        self._stop_requested = False
         self._thread = threading.Thread(
             target=self._thread_main, name=f"myo-{self.info.key}", daemon=True
         )
         self._thread.start()
 
     def stop(self) -> None:
+        self._stop_requested = True
         loop = self._loop
         stop_event = self._stop_event
         if loop and stop_event and loop.is_running():
@@ -90,10 +94,24 @@ class DlMyoSource:
         self._loop = loop
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self._session())
-        except Exception as exc:
-            log.exception("Myo %s failed", self.info.mac)
-            self._status(self.info.key, "error", str(exc))
+            attempt = 0
+            while True:
+                try:
+                    loop.run_until_complete(self._session())
+                    break  # clean stop from within _session
+                except Exception as exc:
+                    if self._stop_requested:
+                        break
+                    attempt += 1
+                    delay = min(30.0, 2.0 * attempt)
+                    log.warning(
+                        "Myo %s dropped (%s); reconnecting in %.0fs",
+                        self.info.mac,
+                        exc,
+                        delay,
+                    )
+                    self._status(self.info.key, "reconnecting", str(exc))
+                    time.sleep(delay)
         finally:
             self._loop = None
             self._stop_event = None
@@ -114,6 +132,7 @@ class DlMyoSource:
             IMUData,
             IMUMode,
             MotionEvent,
+            SleepMode,
         )
 
         source = self
@@ -143,17 +162,53 @@ class DlMyoSource:
         self._status(self.info.key, "connecting", self.info.mac)
         myo = await Myo.with_mac(self.info.mac)
         if myo is None:
+            # A paired Myo that BlueZ already holds a connection to stops
+            # advertising, so the discovery scan never sees it. Ask BlueZ to
+            # release the connection, then retry discovery patiently: the
+            # armband may be asleep and only resumes advertising after it
+            # wakes (movement) or a few seconds after being disconnected.
+            await self._release_bluez_connection()
+            self._status(self.info.key, "connecting", "retrying discovery")
+            for attempt in range(5):
+                await asyncio.sleep(3.0)
+                myo = await Myo.with_mac(self.info.mac)
+                if myo is not None:
+                    break
+                self._status(self.info.key, "connecting", f"discovery retry {attempt + 2}/6")
+        if myo is None:
             raise RuntimeError(f"Myo {self.info.mac} not found")
 
         client = Client()
         client.m = myo
-        await client.connect()
+        # An armband that was just disconnected by BlueZ (or woken from sleep)
+        # often refuses the first connection attempt; bleak surfaces this as a
+        # connect TimeoutError. Retry patiently before giving up.
+        last_connect_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                await client.connect()
+                last_connect_error = None
+                break
+            except TimeoutError as exc:
+                last_connect_error = exc
+                self._status(self.info.key, "connecting", f"connect retry {attempt + 1}/3")
+                await asyncio.sleep(3.0)
+        if last_connect_error is not None:
+            raise RuntimeError(
+                f"Myo {self.info.mac} connect failed: {last_connect_error}"
+            ) from last_connect_error
         try:
             await client.setup(
                 classifier_mode=ClassifierMode.DISABLED,
                 emg_mode=EMGMode.SEND_RAW,
                 imu_mode=IMUMode.SEND_DATA,
             )
+            # Keep-alive: never let the armband sleep while we stream, so a
+            # stationary arm doesn't silently kill the session mid-record.
+            try:
+                await client.set_sleep_mode(SleepMode.NEVER_SLEEP)
+            except Exception:
+                log.debug("could not set NEVER_SLEEP for %s", self.info.mac, exc_info=True)
             self._stop_event = asyncio.Event()
             await client.start()
             battery_task = asyncio.create_task(self._battery_loop(client))
@@ -164,11 +219,26 @@ class DlMyoSource:
                 await battery_task
             self._status(self.info.key, "stopping", None)
         finally:
+            # Restore normal sleep behaviour before disconnecting.
+            with contextlib.suppress(Exception):
+                await client.set_sleep_mode(SleepMode.NORMAL)
             try:
                 await client.stop()
             except Exception:
                 log.debug("stop() failed for %s", self.info.mac, exc_info=True)
             await client.disconnect()
+
+    # ------------------------------------------------------------------ bluez
+
+    async def _release_bluez_connection(self) -> bool:
+        """Disconnect an OS-level (BlueZ) connection to this Myo.
+
+        When a paired armband is connected by the OS (e.g. after pairing with
+        bluetoothctl), it stops advertising and ``dl-myo``'s discovery scan
+        cannot find it. Asking BlueZ to disconnect via D-Bus lets the device
+        resume advertising so a normal connect can proceed.
+        """
+        return await release_bluez_connection(self.info.mac or "")
 
     # ------------------------------------------------------------------ battery
     async def _battery_loop(self, client) -> None:

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
+import threading
 import time
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from myopyc.config import AppConfig, save_config
+from myopyc.devices.adapter import dl_myo_available
+from myopyc.devices.discovery import discover_myos, release_bluez_connection
 from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
 from myopyc.recorder.reader import SessionReader, find_sessions
@@ -21,12 +25,32 @@ from myopyc.ui.plots import DeviceView
 log = logging.getLogger(__name__)
 
 
+def _run_async(coro):
+    """Run ``coro`` to completion on a fresh event loop (worker thread)."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _call_on_ui_thread(context: QtCore.QObject, callback) -> None:
+    """Schedule ``callback`` on the thread that owns ``context``.
+
+    ``QTimer.singleShot(0, callback)`` (without a context object) silently
+    does nothing when it is called from a non-Qt thread. Passing a live
+    ``QObject`` binds the timer to that object's thread, so the callback
+    actually runs on the UI thread (and is cancelled if the object dies).
+    """
+    QtCore.QTimer.singleShot(0, context, callback)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(
         self,
         config: AppConfig,
         *,
-        simulate: int = 1,
+        simulate: int = 0,
         ble_devices: list[tuple[str, str]] | None = None,
         output_dir: Path | str | None = None,
     ) -> None:
@@ -67,6 +91,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if config.ui.auto_start_streaming and self.manager.keys:
             self.manager.start_all()
 
+        if not self.manager.keys and dl_myo_available():
+            # No devices requested: probe for nearby/OS-connected Myos in the
+            # background and connect whatever is found, so a plain `myopyc`
+            # just works when the armband is on (no manual MAC entry).
+            self.statusBar().showMessage("searching for Myo armbands…", 0)
+            self._discovery_thread = threading.Thread(
+                target=self._auto_discover, name="myo-discovery", daemon=True
+            )
+            self._discovery_thread.start()
+        else:
+            self._discovery_thread = None
+
     # ------------------------------------------------------------------ building
     def _build_toolbar(self) -> None:
         toolbar = QtWidgets.QToolBar("Main")
@@ -85,7 +121,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addAction(self.add_arm_action)
 
         connect_action = QtGui.QAction("Connect Myo...", self)
-        connect_action.triggered.connect(self._connect_dialog)
+        connect_action.triggered.connect(self._pick_myos)
         toolbar.addAction(connect_action)
 
         toolbar.addSeparator()
@@ -135,21 +171,80 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._recorder and self.config.ui.auto_start_streaming:
             self.manager.start_all()
 
-    def _connect_dialog(self) -> None:
-        mac, ok = QtWidgets.QInputDialog.getText(
-            self, "Connect Myo", "MAC address (e.g. D2:3B:85:94:32:8E):"
-        )
-        if not ok or not mac.strip():
+    # ------------------------------------------------------------------ device picker
+    def _pick_myos(self) -> None:
+        """Open a dialog that scans and lists nearby Myo armbands."""
+        dialog = _MyoPickerDialog(self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        mac = mac.strip()
-        binding = self.config.binding_for_mac(mac)
-        default_label = binding.label if binding else ("Left" if not self.manager.keys else "Right")
-        label, ok = QtWidgets.QInputDialog.getText(
-            self, "Device label", "Label for this armband:", text=default_label
-        )
-        if not ok or not label.strip():
+        entries = dialog.selected_entries()
+        if not entries:
             return
-        self._connect_ble_device(mac, label.strip())
+        for entry, default_label in entries:
+            if len(self.manager.keys) >= 2:
+                break
+            binding = self.config.binding_for_mac(entry.mac)
+            label = binding.label if binding else default_label
+            if entry.connected:
+                # Release the OS-held connection in the background so our BLE
+                # client can take over; connecting itself is retried patiently
+                # by the adapter, so no need to block the UI here.
+                threading.Thread(
+                    target=self._release_then_connect,
+                    args=(entry.mac, label),
+                    daemon=True,
+                    name=f"release-{entry.mac}",
+                ).start()
+            else:
+                self._connect_ble_device(entry.mac, label)
+
+    def _release_then_connect(self, mac: str, label: str) -> None:
+        try:
+            _run_async(release_bluez_connection(mac))
+            time.sleep(2.0)
+        except Exception:
+            log.exception("could not release BlueZ connection to %s", mac)
+        _call_on_ui_thread(self, lambda: self._connect_ble_device(mac, label))
+
+    # ------------------------------------------------------------------ auto-discovery
+    def _auto_discover(self) -> None:
+        """Probe for Myo armbands off the UI thread, then connect them.
+
+        Executed on a daemon thread; all UI interaction is marshalled back
+        onto the Qt thread via zero-timeout single-shot timers.
+        """
+
+        def on_results(macs: list[str]) -> None:
+            for mac in macs:
+                if len(self.manager.keys) >= 2:
+                    break
+                binding = self.config.binding_for_mac(mac)
+                label = binding.label if binding else ("Left" if not self.manager.keys else "Right")
+                self._connect_ble_device(mac, label)
+            if not self.manager.keys:
+                self.statusBar().showMessage(
+                    "no Myo found; wake the armband or use Connect Myo…", 8000
+                )
+            elif self.config.ui.auto_start_streaming:
+                self.manager.start_all()
+
+        found: list = []
+        try:
+            found = _run_async(discover_myos())
+        except Exception:
+            log.exception("myo discovery failed")
+        macs: list[str] = []
+        for entry in found:
+            if entry.connected:
+                # OS holds the connection; release it so our BLE client can
+                # take over, then give the armband a moment to re-advertise.
+                try:
+                    _run_async(release_bluez_connection(entry.mac))
+                except Exception:
+                    log.exception("could not release BlueZ connection to %s", entry.mac)
+                time.sleep(2.0)
+            macs.append(entry.mac)
+        _call_on_ui_thread(self, lambda: on_results(macs))
 
     def _connect_ble_device(self, mac: str, label: str) -> None:
         try:
@@ -314,3 +409,148 @@ class MainWindow(QtWidgets.QMainWindow):
             self.record_action.setChecked(False)
         self.manager.stop_all()
         super().closeEvent(event)
+
+
+class _MyoPickerDialog(QtWidgets.QDialog):
+    """Scan-and-pick dialog for Myo armbands.
+
+    Runs ``discover_myos()`` on a background thread, streams results into a
+    list widget, and returns the user's selection (with labels) on accept.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Connect Myo")
+        self.setMinimumSize(460, 340)
+        self._entries: dict[str, object] = {}  # mac -> DiscoveredMyo
+        self._scan_done = False
+        self._scanning = False
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        top = QtWidgets.QHBoxLayout()
+        hint = QtWidgets.QLabel("Scanning for Myo armbands… (about 5 s)")
+        hint.setWordWrap(True)
+        top.addWidget(hint, 1)
+        self._hint = hint
+        self._rescan = QtWidgets.QPushButton("Rescan", self)
+        self._rescan.setEnabled(False)
+        self._rescan.clicked.connect(self._start_scan)
+        top.addWidget(self._rescan)
+        layout.addLayout(top)
+
+        self._list = QtWidgets.QListWidget(self)
+        self._list.itemDoubleClicked.connect(lambda _item: self.accept())
+        layout.addWidget(self._list, 1)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Connect")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._ok = buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        self._ok.setEnabled(False)
+
+        self._start_scan()
+
+    # -- background scan ---------------------------------------------------
+    def _start_scan(self) -> None:
+        if self._scanning:
+            return
+        self._scanning = True
+        self._scan_done = False
+        self._hint.setText("Scanning for Myo armbands… (about 5 s)")
+        self._rescan.setEnabled(False)
+        self._thread = threading.Thread(target=self._scan, daemon=True, name="myo-scan")
+        self._thread.start()
+
+    def _scan(self) -> None:
+        try:
+            found = _run_async(discover_myos())
+        except Exception:
+            log.exception("myo scan failed")
+            found = []
+        try:
+            from myopyc.devices.discovery import merge_saved_bindings
+
+            found = merge_saved_bindings(found, {b.mac: b.label for b in self._bindings()})
+        except Exception:
+            log.exception("could not merge saved bindings into scan results")
+        # Bind the timer to ``self`` so it is delivered on the Qt thread; the
+        # context-free singleShot overload is a no-op from a worker thread.
+        _call_on_ui_thread(self, lambda: self._populate(found))
+
+    def _bindings(self):
+        return self.parent().config.devices if self.parent() is not None else []
+
+    def _streaming_macs(self) -> set[str]:
+        parent = self.parent()
+        if parent is None or not hasattr(parent, "manager"):
+            return set()
+        try:
+            return {parent.manager.info(key).mac.upper() for key in parent.manager.keys}
+        except Exception:
+            return set()
+
+    def _populate(self, found: list) -> None:
+        self._scanning = False
+        self._scan_done = True
+        self._rescan.setEnabled(True)
+
+        previously_checked: set[str] = set()
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item.checkState() == QtCore.Qt.CheckState.Checked:
+                previously_checked.add(item.data(QtCore.Qt.ItemDataRole.UserRole))
+        self._list.clear()
+        self._entries.clear()
+
+        streaming = self._streaming_macs()
+        visible = []
+        for entry in found:
+            if entry.mac.upper() in streaming:
+                continue  # already streaming through myopyc
+            visible.append(entry)
+
+        if not visible:
+            self._hint.setText(
+                "No Myo armbands found.\nWake the armband (move it) and press Rescan."
+            )
+            self._ok.setEnabled(False)
+            return
+
+        self._hint.setText(
+            f"Found {len(visible)} armband(s). Select one or more, then press Connect."
+        )
+        for entry in visible:
+            self._entries[entry.mac] = entry
+            if entry.connected:
+                state = " (OS connected)"
+            elif entry.remembered:
+                state = " (remembered - wake it to connect)"
+            else:
+                state = ""
+            item = QtWidgets.QListWidgetItem(f"{entry.name} - {entry.mac}{state}")
+            checked = not previously_checked or entry.mac in previously_checked
+            item.setCheckState(
+                QtCore.Qt.CheckState.Checked if checked else QtCore.Qt.CheckState.Unchecked
+            )
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, entry.mac)
+            self._list.addItem(item)
+        self._ok.setEnabled(True)
+
+    # -- results ------------------------------------------------------------
+    def selected_entries(self) -> list[tuple[object, str]]:
+        """Return checked entries with a Left/Right label assigned in order."""
+        picks: list[tuple[object, str]] = []
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item.checkState() != QtCore.Qt.CheckState.Checked:
+                continue
+            mac = item.data(QtCore.Qt.ItemDataRole.UserRole)
+            label = ("Left", "Right")[len(picks) % 2]
+            picks.append((self._entries[mac], label))
+        return picks

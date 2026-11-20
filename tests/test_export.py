@@ -62,8 +62,12 @@ def test_npz_export_roundtrips_arrays(recorded_session, tmp_path) -> None:
     with np.load(out) as npz:
         # Both devices appear; the right one is empty but present as a typed array.
         assert set(npz.files) == {
-            "left/emg", "left/imu", "left/event",
-            "right/emg", "right/imu", "right/event",
+            "left/emg",
+            "left/imu",
+            "left/event",
+            "right/emg",
+            "right/imu",
+            "right/event",
         }
         assert npz["left/emg"].size == 4
         # t_ns monotonic and dtype preserved through export.

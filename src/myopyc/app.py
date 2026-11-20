@@ -11,7 +11,7 @@ from myopyc.config import AppConfig
 def run_gui(
     config: AppConfig,
     *,
-    simulate: int = 1,
+    simulate: int = 0,
     ble_devices: list[tuple[str, str]] | None = None,
     output_dir: Path | str | None = None,
 ) -> int:
