@@ -20,6 +20,7 @@ from myopyc.recorder.reader import SessionReader, find_sessions
 from myopyc.recorder.writer import SessionRecorder
 from myopyc.streams.health import DeviceHealth, RateTracker, format_status_line
 from myopyc.streams.live import LiveBuffer
+from myopyc.streams.schema import EVENT_TYPE_NAMES, StreamKind
 from myopyc.ui.plots import DeviceView
 
 log = logging.getLogger(__name__)
@@ -115,6 +116,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.record_action.setShortcut("Ctrl+R")
         self.record_action.toggled.connect(self._toggle_recording)
         toolbar.addAction(self.record_action)
+
+        # Gesture flash/annotation: checked by default (announcements visible),
+        # unchecked silences them entirely ("toggleable suppression").
+        self.gesture_action = QtGui.QAction("Gesture annotations", self)
+        self.gesture_action.setCheckable(True)
+        self.gesture_action.setChecked(self.config.ui.gesture_annotations)
+        self.gesture_action.toggled.connect(self._toggle_gesture_annotations)
+        toolbar.addAction(self.gesture_action)
 
         self.add_arm_action = QtGui.QAction("Add simulated arm", self)
         self.add_arm_action.triggered.connect(self._add_simulated)
@@ -292,6 +301,38 @@ class MainWindow(QtWidgets.QMainWindow):
         if recorder is not None:
             with contextlib.suppress(KeyError):
                 recorder.add(batch)
+        if batch.kind is StreamKind.EVENT and self.gesture_action.isChecked():
+            self._announce_event(batch)
+
+    def _announce_event(self, batch: SampleBatch) -> None:
+        """Flash the gesture annotation on the device panel for a fired pose.
+
+        Runs on whatever thread the source emits from; the UI work is
+        marshalled onto the Qt thread so the label/timer are touched safely.
+        """
+
+        for row in batch.data:
+            name = EVENT_TYPE_NAMES.get(int(row["type"]), f"unknown-{int(row['type'])}")
+            view = self._views.get(batch.device)
+            if view is None:
+                continue
+            if QtCore.QThread.currentThread() is self.thread():
+                # Already on the UI thread (tests, or a UI-side emit): flash now.
+                view.announce_event(name)
+            else:
+                # Sources emit from their own threads; marshal onto the Qt thread.
+                _call_on_ui_thread(self, lambda v=view, n=name: v.announce_event(n))
+
+    def _toggle_gesture_annotations(self, checked: bool) -> None:
+        self.config.ui.gesture_annotations = checked
+        try:
+            save_config(self.config)
+        except OSError:
+            log.exception("could not persist gesture-annotation toggle")
+        if not checked:
+            self.statusBar().showMessage("gesture annotations off", 4000)
+        else:
+            self.statusBar().showMessage("gesture annotations on", 4000)
 
     # ------------------------------------------------------------------ recording
     def _toggle_recording(self, checked: bool) -> None:

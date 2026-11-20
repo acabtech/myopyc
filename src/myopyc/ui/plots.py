@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from myopyc.devices.model import DeviceInfo
 from myopyc.streams.live import LiveBuffer
@@ -69,6 +69,9 @@ class ImuPlot(pg.PlotWidget):
 class DeviceView(QtWidgets.QGroupBox):
     """One armband: status header plus EMG and IMU plots."""
 
+    #: How long a fired gesture stays highlighted before dimming to grey.
+    GESTURE_FLASH_MS = 2000
+
     def __init__(
         self,
         info: DeviceInfo,
@@ -85,6 +88,8 @@ class DeviceView(QtWidgets.QGroupBox):
 
         self.status_label = QtWidgets.QLabel("idle")
         self.status_label.setStyleSheet("color: #9aa4b2;")
+        self.gesture_label = QtWidgets.QLabel("")
+        self.gesture_label.setStyleSheet("color: #6f7a89;")
         self.battery_label = QtWidgets.QLabel("")
         self.battery_label.setStyleSheet("color: #9aa4b2;")
         self.orientation_label = QtWidgets.QLabel("")
@@ -92,6 +97,8 @@ class DeviceView(QtWidgets.QGroupBox):
 
         header = QtWidgets.QHBoxLayout()
         header.addWidget(self.status_label)
+        header.addSpacing(12)
+        header.addWidget(self.gesture_label)
         header.addStretch(1)
         header.addWidget(self.orientation_label)
         header.addSpacing(12)
@@ -104,6 +111,28 @@ class DeviceView(QtWidgets.QGroupBox):
         layout.addLayout(header)
         layout.addWidget(self.emg, stretch=3)
         layout.addWidget(self.imu, stretch=2)
+
+        # Single-shot timer that dims the gesture annotation after the flash.
+        self._gesture_timer = QtCore.QTimer(self)
+        self._gesture_timer.setSingleShot(True)
+        self._gesture_timer.setInterval(self.GESTURE_FLASH_MS)
+        self._gesture_timer.timeout.connect(self._dim_gesture)
+
+    def announce_event(self, name: str) -> None:
+        """Flash an annotation for a fired gesture/pose named ``name``.
+
+        Called from the UI thread (marshalled by :class:`MainWindow`). The
+        label stays visible after the flash — it becomes the annotation of
+        the most recent gesture for this armband — but dims to grey so a
+        fresh gesture still stands out.
+        """
+
+        self.gesture_label.setText(f"gesture: {name}")
+        self.gesture_label.setStyleSheet("color: #ffd166; font-weight: bold;")
+        self._gesture_timer.start()
+
+    def _dim_gesture(self) -> None:
+        self.gesture_label.setStyleSheet("color: #6f7a89;")
 
     def update_display(self, state: str, detail: str | None, battery: int | None) -> None:
         text = state

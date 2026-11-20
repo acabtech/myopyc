@@ -5,6 +5,21 @@ Keep a Changelog and the project uses semantic versioning.
 
 ## [0.2.0.dev0]
 
+### Added
+
+- GUI gesture annotations: a fired pose (fist, waves, double click, from either
+  the simulated or the real armband) flashes a bold amber `gesture: <name>`
+  label on the device panel header for 2 s, then dims to grey as the
+  annotation of the most recent gesture. A checkable toolbar action
+  ("Gesture annotations", on by default and persisted to `config.toml` as
+  `ui.gesture_annotations`) provides toggleable suppression — when off, EVENT
+  batches are still recorded and counted but never announced in the UI.
+  Covered by offscreen Qt tests (flash, suppression toggle, config round trip).
+- Explicit legacy-reader tolerance test for the event stream: a v0.1-style
+  reader that only knows EMG/IMU skips a session's `event` stream entry and
+  chunk directory without error, pinning the append-only `FORMAT_VERSION == 1`
+  contract for the gesture/pose milestone.
+
 ### Changed
 
 - Post-release version bump to `0.2.0.dev0` (development toward the v0.2

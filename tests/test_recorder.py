@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from myopyc.recorder.manifest import read_manifest
@@ -197,4 +198,46 @@ def test_append_only_manifest_fields_ignored(tmp_path) -> None:
     assert not any(row["stream"] == "future_stream" for row in summary["streams"])
 
     # A reader path that never asked to mutate the session leaves it intact.
+    assert (session_dir / "manifest.json").read_text(encoding="utf-8").endswith("}\n")
     assert read_manifest(session_dir)["markers"][0]["label"] == "start"
+
+
+def test_legacy_v01_reader_skips_event_stream(tmp_path) -> None:
+    """A v0.1 reader (which predates ``StreamKind.EVENT``) tolerates an ``event``.
+
+    The v0.2 event stream is a new per-stream manifest key; a reader that only
+    knows EMG/IMU must simply skip it — loading and summary must not touch or
+    crash on the unknown ``event`` entry or its chunk files.
+    """
+
+    recorder = _recorder(tmp_path)
+    recorder.add(make_event("left", count=2, type_code=EVENT_TYPE_IDS["fist"]))
+    recorder.add(make_emg("left", count=4, t0=1_000_000_000))
+    recorder.add(make_imu("left", count=2))
+    session_dir = recorder.stop()
+    assert (session_dir / "devices" / "left" / "event").is_dir()
+
+    # A faithful stand-in for the v0.1 reader: it enumerates only the kinds it
+    # knows and uses .get() on the per-stream entry, so unknown keys are inert.
+    legacy_kinds = (StreamKind.EMG, StreamKind.IMU)
+    manifest = read_manifest(session_dir)
+    streams = manifest["devices"]["left"]["streams"]
+    assert "event" in streams  # the session genuinely carries the new kind
+
+    for kind in legacy_kinds:
+        entry = streams.get(kind.value, {})
+        assert int(entry.get("samples", 0)) >= 0
+        for chunk in entry.get("chunks", []):
+            array = np.load(session_dir / chunk["file"], allow_pickle=False)
+            assert array.size > 0
+
+    # Summary built the v0.1 way never reports the unknown stream kind.
+    rows = [
+        {
+            "stream": kind.value,
+            "samples": int(streams.get(kind.value, {}).get("samples", 0)),
+        }
+        for kind in legacy_kinds
+    ]
+    assert {row["stream"] for row in rows} == {"emg", "imu"}
+    assert not any(row["stream"] == "event" for row in rows)

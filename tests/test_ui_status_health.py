@@ -21,7 +21,7 @@ from PySide6 import QtWidgets
 
 from myopyc.config import AppConfig
 from myopyc.devices.model import SampleBatch
-from myopyc.streams.schema import EMG_DTYPE, IMU_DTYPE, StreamKind
+from myopyc.streams.schema import EMG_DTYPE, EVENT_DTYPE, IMU_DTYPE, StreamKind
 from myopyc.ui.main_window import MainWindow
 
 
@@ -174,5 +174,81 @@ def test_device_view_shows_reconnecting_state(qapp: QtWidgets.QApplication) -> N
         view.update_display("streaming", "raw EMG + IMU", 80)
         assert view.status_label.text() == "streaming - raw EMG + IMU"
         assert "48d1cc" in view.status_label.styleSheet()
+    finally:
+        _close(window)
+
+
+def _event(device: str, type_code: int, count: int = 1) -> SampleBatch:
+    rows = np.zeros(count, dtype=EVENT_DTYPE)
+    rows["t_ns"] = 1_000_000_000 + np.arange(count) * 1_000_000
+    rows["seq"] = np.arange(count)
+    rows["type"] = type_code
+    rows["ow"] = 1.0
+    return SampleBatch(device, StreamKind.EVENT, rows)
+
+
+def test_gesture_annotation_flashes_on_event(qapp: QtWidgets.QApplication) -> None:
+    """A fired pose flashes the amber gesture label on the device panel."""
+
+    from myopyc.streams.schema import EVENT_TYPE_IDS
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        info = window.manager.add_simulated("Left")
+        window._mount_view(info)
+        view = window._views[info.key]
+        assert view.gesture_label.text() == ""
+
+        window._on_samples(_event(info.key, EVENT_TYPE_IDS["fist"]))
+        assert view.gesture_label.text() == "gesture: fist"
+        assert "ffd166" in view.gesture_label.styleSheet()  # the flash amber
+
+        # A second event updates the annotation to the newest pose.
+        window._on_samples(_event(info.key, EVENT_TYPE_IDS["wave_left"]))
+        assert view.gesture_label.text() == "gesture: wave_left"
+    finally:
+        _close(window)
+
+
+def test_gesture_annotation_suppression_toggle(qapp: QtWidgets.QApplication) -> None:
+    """Unchecking 'Gesture annotations' silences EVENT announcements."""
+
+    from myopyc.streams.schema import EVENT_TYPE_IDS
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        info = window.manager.add_simulated("Left")
+        window._mount_view(info)
+        view = window._views[info.key]
+
+        window.gesture_action.setChecked(False)
+        assert window.config.ui.gesture_annotations is False
+
+        window._on_samples(_event(info.key, EVENT_TYPE_IDS["double_click"]))
+        assert view.gesture_label.text() == ""  # suppressed entirely
+
+        # Re-enabling resumes the flash.
+        window.gesture_action.setChecked(True)
+        assert window.config.ui.gesture_annotations is True
+        window._on_samples(_event(info.key, EVENT_TYPE_IDS["fist"]))
+        assert view.gesture_label.text() == "gesture: fist"
+    finally:
+        _close(window)
+
+
+def test_gesture_annotation_config_persisted(
+    qapp: QtWidgets.QApplication, tmp_path
+) -> None:
+    """The toggle survives a config save/reload round trip."""
+
+    from myopyc.config import load_config, save_config
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        window.gesture_action.setChecked(False)
+        path = tmp_path / "config.toml"
+        save_config(window.config, path)
+        reloaded = load_config(path)
+        assert reloaded.ui.gesture_annotations is False
     finally:
         _close(window)
