@@ -18,7 +18,13 @@ import numpy as np
 
 from myopyc.devices.discovery import release_bluez_connection
 from myopyc.devices.model import DeviceInfo, SampleBatch
-from myopyc.streams.schema import EMG_DTYPE, IMU_DTYPE, StreamKind
+from myopyc.streams.schema import (
+    EMG_DTYPE,
+    EVENT_DTYPE,
+    EVENT_TYPE_IDS_BY_POSE_NAME,
+    IMU_DTYPE,
+    StreamKind,
+)
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +69,10 @@ class DlMyoSource:
         self._stop_requested = False
         self._emg_seq = 0
         self._imu_seq = 0
+        self._event_seq = 0
+        # Last IMU quaternion, captured as the orientation payload for EVENT
+        # rows (the classifier/motion notifications carry no orientation).
+        self._last_orientation: tuple[float, float, float, float] | None = None
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> None:
@@ -139,7 +149,7 @@ class DlMyoSource:
 
         class Client(MyoClient):
             async def on_classifier_event(self, ce: ClassifierEvent) -> None:
-                return None
+                source._on_classifier_event(ce)
 
             async def on_aggregated_data(self, ad: AggregatedData) -> None:
                 return None
@@ -199,7 +209,7 @@ class DlMyoSource:
             ) from last_connect_error
         try:
             await client.setup(
-                classifier_mode=ClassifierMode.DISABLED,
+                classifier_mode=ClassifierMode.ENABLED,
                 emg_mode=EMGMode.SEND_RAW,
                 imu_mode=IMUMode.SEND_DATA,
             )
@@ -278,5 +288,45 @@ class DlMyoSource:
         row["qz"] = imu.orientation.z
         row["ax"], row["ay"], row["az"] = imu.accelerometer
         row["gx"], row["gy"], row["gz"] = imu.gyroscope
+        self._last_orientation = (
+            float(row["qw"][0]),
+            float(row["qx"][0]),
+            float(row["qy"][0]),
+            float(row["qz"][0]),
+        )
         self._imu_seq += 1
         self._emit(SampleBatch(self.info.key, StreamKind.IMU, row))
+
+    # ------------------------------------------------------------------ events
+    def _on_classifier_event(self, ce) -> None:
+        """Decode a classifier notification into an EVENT batch, if it is a pose.
+
+        Only ``POSE`` events map to the recorded gesture vocabulary; arm
+        sync/unlock/status events are noise for downstream analysis and are
+        dropped. Unknown pose names (new firmware) also drop rather than
+        recording a misleading code.
+        """
+        from myo.types import ClassifierEventType
+
+        if ce.t is not ClassifierEventType.POSE:
+            return
+        row = np.empty(1, dtype=EVENT_DTYPE)
+        row["t_ns"] = time.monotonic_ns()
+        row["seq"] = self._event_seq
+        type_id = EVENT_TYPE_IDS_BY_POSE_NAME.get(ce.pose.name)
+        if type_id is None:
+            log.debug("unmapped pose %s from %s; dropping", ce.pose.name, self.info.mac)
+            return
+        row["type"] = type_id
+        if self._last_orientation is not None:
+            row["ow"], row["ox"], row["oy"], row["oz"] = self._last_orientation
+        else:
+            # Identity quaternion: no IMU sample seen yet. All four payload
+            # fields are set explicitly — the row buffer is np.empty, so any
+            # field left untouched would carry uninitialized memory.
+            row["ow"] = 1.0
+            row["ox"] = 0.0
+            row["oy"] = 0.0
+            row["oz"] = 0.0
+        self._event_seq += 1
+        self._emit(SampleBatch(self.info.key, StreamKind.EVENT, row))

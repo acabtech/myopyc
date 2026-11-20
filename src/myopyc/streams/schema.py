@@ -73,6 +73,21 @@ no gesture). Unknown integers are rendered as ``"unknown-<n>"`` by
 
 EVENT_TYPE_IDS: dict[str, int] = {name: code for code, name in EVENT_TYPE_NAMES.items()}
 
+#: ``dl-myo`` :class:`myo.types.Pose` enum *names* mapped to this project's
+#: EVENT ``type`` codes. Keyed by name (not enum value) so the decode path never
+#: needs the optional ``dl-myo`` import. ``wave_in``/``wave_out`` are rendered
+#: as ``wave_left``/``wave_right`` (the armband's "in/out" is relative to the
+#: forearm, ours is left/right on the body). ``fingers_spread`` extends the
+#: vocabulary (code 5) purely additively — old readers render it ``unknown-5``.
+EVENT_TYPE_IDS_BY_POSE_NAME: dict[str, int] = {
+    "REST": EVENT_TYPE_IDS["none"],
+    "FIST": EVENT_TYPE_IDS["fist"],
+    "WAVE_IN": EVENT_TYPE_IDS["wave_left"],
+    "WAVE_OUT": EVENT_TYPE_IDS["wave_right"],
+    "FINGERS_SPREAD": 5,
+    "DOUBLE_TAP": EVENT_TYPE_IDS["double_click"],
+}
+
 #: Fields packed into :attr:`EVENT_DTYPE`'s ``payload`` column, in order.
 EVENT_PAYLOAD_FIELDS = ("ox", "oy", "oz", "ow")
 

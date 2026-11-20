@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 
 import numpy as np
 import pytest
@@ -281,3 +282,128 @@ def test_merge_saved_bindings_adds_remembered_and_dedupes() -> None:
     assert len(merged) == 1
     assert merged[0].name == "Sam's Myo"
     assert merged[0].remembered is False
+
+
+# --------------------------------------------------------------------- events
+# Pose -> EVENT type decoding in DlMyoSource. The classifier notification only
+# carries a pose; the orientation payload is the last IMU quaternion.
+
+
+class _FakeEventType:
+    """Duck-typed stand-in for ``myo.types.ClassifierEventType``."""
+
+    POSE = "pose"
+
+
+class _FakePose:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeClassifierEvent:
+    """Duck-typed stand-in for ``myo.types.ClassifierEvent``."""
+
+    def __init__(self, event_type: object, pose_name: str | None = None) -> None:
+        self.t = event_type
+        if pose_name is not None:
+            self.pose = _FakePose(pose_name)
+
+
+@pytest.fixture()
+def _real_classifier_enum(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the decoder's ``myo.types`` import at the fake enum.
+
+    The real import happens inside ``_on_classifier_event`` (dl-myo is an
+    optional dependency), so the monkeypatch swaps ``myo.types`` wholesale.
+    """
+
+    import types as _types
+
+    fake_types = _types.ModuleType("myo.types")
+    fake_types.ClassifierEventType = _FakeEventType  # type: ignore[attr-defined]
+    fake_myos = _types.ModuleType("myo")
+    setattr(fake_myos, "types", fake_types)  # module attr not in mypy's stubs
+    monkeypatch.setitem(sys.modules, "myo", fake_myos)
+    monkeypatch.setitem(sys.modules, "myo.types", fake_types)
+
+
+def _make_event_source(events: list[SampleBatch]) -> adapter_mod.DlMyoSource:
+    info = DeviceInfo(key="real", label="Real", mac="D2:3B:85:94:32:8E", name="Myo")
+    source = adapter_mod.DlMyoSource.__new__(adapter_mod.DlMyoSource)
+    source.info = info
+    source._emit = events.append
+    source._event_seq = 0
+    source._last_orientation = None
+    return source
+
+
+def test_adapter_pose_event_decode_and_orientation_payload(
+    _real_classifier_enum: None,
+) -> None:
+    """A POSE classifier event becomes an EVENT row with the last IMU quaternion."""
+
+    events: list[SampleBatch] = []
+    source = _make_event_source(events)
+    # Feed an IMU quaternion first, as the BLE stream would.
+    source._last_orientation = (0.9, 0.1, 0.2, 0.3)
+
+    source._on_classifier_event(_FakeClassifierEvent(_FakeEventType.POSE, "FIST"))
+
+    assert len(events) == 1
+    batch = events[0]
+    assert batch.device == "real"
+    assert batch.kind is StreamKind.EVENT
+    row = batch.data[0]
+    assert int(row["type"]) == EVENT_TYPE_IDS["fist"]
+    assert int(row["seq"]) == 0
+    assert (
+        float(row["ow"]),
+        float(row["ox"]),
+        float(row["oy"]),
+        float(row["oz"]),
+    ) == pytest.approx((0.9, 0.1, 0.2, 0.3))
+
+    # A second pose increments the event sequence counter, mirroring EMG/IMU.
+    source._on_classifier_event(_FakeClassifierEvent(_FakeEventType.POSE, "WAVE_IN"))
+    assert len(events) == 2
+    assert int(events[1].data[0]["type"]) == EVENT_TYPE_IDS["wave_left"]
+    assert int(events[1].data[0]["seq"]) == 1
+
+
+def test_adapter_pose_without_imu_gets_identity_orientation(
+    _real_classifier_enum: None,
+) -> None:
+    """A pose before the first IMU sample records an identity quaternion."""
+
+    events: list[SampleBatch] = []
+    source = _make_event_source(events)
+    source._on_classifier_event(_FakeClassifierEvent(_FakeEventType.POSE, "DOUBLE_TAP"))
+    assert len(events) == 1
+    row = events[0].data[0]
+    assert float(row["ow"]) == 1.0
+    assert float(row["ox"]) == 0.0
+    assert float(row["oy"]) == 0.0
+    assert float(row["oz"]) == 0.0
+
+
+def test_adapter_non_pose_classifier_events_are_dropped(
+    _real_classifier_enum: None,
+) -> None:
+    """Arm-sync/unlock style events are noise; nothing is emitted."""
+
+    events: list[SampleBatch] = []
+    source = _make_event_source(events)
+    source._on_classifier_event(_FakeClassifierEvent("arm_synced"))
+    source._on_classifier_event(_FakeClassifierEvent("unlocked"))
+    assert events == []
+
+
+def test_adapter_unknown_pose_name_is_dropped(_real_classifier_enum: None) -> None:
+    """A pose name outside the map (new firmware) must not emit a bad code."""
+
+    events: list[SampleBatch] = []
+    source = _make_event_source(events)
+    source._on_classifier_event(_FakeClassifierEvent(_FakeEventType.POSE, "SPREAD_FINGERS_PRO"))
+    assert events == []
+    # The sequence counter stays untouched so ordering never skips.
+    assert source._event_seq == 0

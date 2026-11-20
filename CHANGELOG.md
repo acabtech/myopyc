@@ -21,6 +21,14 @@ Keep a Changelog and the project uses semantic versioning.
   demoable and testable without hardware. Stream health treats event-driven
   streams by flow rather than rate — the status bar reports `event <n> in
   window`, and a quiet window reads `idle`, never a misleading `stalled`/`degraded`.
+- Real gesture capture from hardware: the BLE adapter now enables the Myo's
+  classifier (`ClassifierMode.ENABLED`) and decodes pose classifier events into
+  the EVENT stream (fist, wave_left/right, fingers_spread, double_click;
+  wave_in/out mapped to wave_left/right). The orientation payload is the most
+  recent IMU quaternion (identity until the first IMU sample), event rows carry
+  their own sequence counter, and non-pose classifier events (arm sync, unlock)
+  plus unmapped pose names are dropped rather than recorded. Covered by
+  duck-typed classifier-event tests (no hardware needed).
 - `StreamKind.EVENT` stream foundation (first slice of the v0.2 gesture/pose
   work): a dedicated third stream kind with its own dtype (`t_ns`, `seq`,
   `type`, packed `ox/oy/oz/ow` orientation payload) and a documented pose
