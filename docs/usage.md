@@ -116,6 +116,27 @@ reader = SessionReader("<session>")
 report = reader.repair()  # report.changed tells you if anything moved
 ```
 
+## Exporting a session
+
+For one-off analysis outside Python, export a recorded session to CSV (one file
+per device/stream, with a human-readable ISO timestamp column `t_iso` next to
+the raw `t_ns` nanoseconds) or to a compressed NPZ archive (one array per
+`<device>/<stream>` key, exact dtypes preserved):
+
+```bash
+# CSV into a directory (default output: <session>-export)
+myopyc export <session> --format csv
+myopyc export <session> --format csv --output /tmp/exported
+
+# One NPZ archive
+myopyc export <session> --format npz --output /tmp/session.npz
+```
+
+CSV files skip streams with no samples; NPZ always contains every
+device/stream key (empty streams are zero-length typed arrays). The ISO
+timestamp is rendered from the host *monotonic* clock, so it is relative
+time for readability and sorting — not wall-clock truth.
+
 ## Reading data in Python
 
 ```python

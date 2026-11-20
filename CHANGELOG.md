@@ -7,6 +7,13 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Session export for downstream analysis: `myopyc export <session> --format
+  csv|npz [--output PATH]`. CSV writes one file per device/stream (skipping
+  streams with no samples) with a human-readable ISO timestamp column
+  (`t_iso`) alongside the raw `t_ns` nanoseconds; NPZ writes one compressed
+  archive with `<device>/<stream>` array keys preserving the exact dtypes.
+  Default output is `<session>-export` (a directory for CSV, a `.npz` file for
+  NPZ).
 - Simulated gesture events: `SimulatedSource` emits a plausible EVENT batch on a
   random ~4–10 s cadence (first gesture 2–6 s after start) with a pose drawn
   from the real Myo vocabulary (fist, wave_left, wave_right, double_click) and

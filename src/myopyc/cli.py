@@ -183,6 +183,20 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export(args: argparse.Namespace) -> int:
+    from myopyc.recorder.export import export_session
+
+    out = args.output or args.session.with_name(args.session.name + "-export")
+    try:
+        written = export_session(args.session, out, args.format)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    for path in written:
+        print(path)
+    return 0
+
+
 def _cmd_sessions(args: argparse.Namespace) -> int:
     from myopyc.recorder.reader import find_sessions
 
@@ -235,6 +249,22 @@ def build_parser() -> argparse.ArgumentParser:
         "(recover a crash-interrupted session)",
     )
     inspect.set_defaults(func=_cmd_inspect)
+
+    export = sub.add_parser("export", help="export a recorded session for analysis")
+    export.add_argument("session", type=Path, help="path to the session directory")
+    export.add_argument(
+        "--format",
+        default="csv",
+        choices=("csv", "npz"),
+        help="export format (default: csv)",
+    )
+    export.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="output directory (csv) or file (npz); default: <session>-export",
+    )
+    export.set_defaults(func=_cmd_export)
 
     sessions = sub.add_parser("sessions", help="list recorded sessions")
     sessions.add_argument("--output-dir", type=Path, default=None)
