@@ -1,3 +1,6 @@
+# Linux-only stance: myopyc explicitly targets Linux (BlueZ/dongleless BLE via
+# dl-myo); Windows/macOS support is an unassigned icebox item, so CI runs on a
+# single ubuntu-latest runner only.
 name: CI
 
 on:
@@ -21,5 +24,9 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
           uv run mypy src/myopyc tests
+      # Headless Qt UI smoke tests (tests/test_ui_status_health.py) require a
+      # Qt platform plugin without a display server.
       - name: Test
-        run: uv run pytest --cov=myopyc --cov-report=term-missing --cov-fail-under=70
+        run: |
+          export QT_QPA_PLATFORM=offscreen
+          uv run pytest --cov=myopyc --cov-report=term-missing --cov-fail-under=70

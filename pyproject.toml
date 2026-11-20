@@ -1,6 +1,6 @@
 [project]
 name = "myopyc"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Dongleless Thalmic Myo EMG/IMU capture and visualization for up to two armbands"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }

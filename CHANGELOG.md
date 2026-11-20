@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format follows
 Keep a Changelog and the project uses semantic versioning.
 
+## [0.2.0.dev0]
+
+### Changed
+
+- Post-release version bump to `0.2.0.dev0` (development toward the v0.2
+  collection-workflow milestone).
+- CI now sets `QT_QPA_PLATFORM=offscreen` explicitly in the Test step so the
+  headless Qt UI smoke tests (`tests/test_ui_status_health.py`) run
+  deterministically in the workflow rather than relying on the test module's
+  own environment default, and the Linux-only stance is documented as a
+  comment in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+
 ## [0.1.0] - 2026-11-20
 
 ### Added
