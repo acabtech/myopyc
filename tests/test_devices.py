@@ -8,8 +8,13 @@ batches directly through :meth:`DeviceManager._emit`, keeping the suite fast.
 
 from __future__ import annotations
 
-import numpy as np
+import asyncio
+import contextlib
 
+import numpy as np
+import pytest
+
+from myopyc.devices import adapter as adapter_mod
 from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
 from myopyc.devices.simulator import SimulatedSource
@@ -94,3 +99,94 @@ def test_remove_device() -> None:
     manager.remove(info.key)
     assert manager.keys == []
     assert not manager.has(info.key)
+
+
+# ------------------------------------------------------------------ battery paths
+def test_simulator_reports_battery_via_fake_callback() -> None:
+    """The simulator publishes battery through its callback, then drains it."""
+    info = DeviceInfo(key="left", label="Left", mac="SIM-LEFT", name="Simulated Myo")
+    readings: list[int] = []
+    source = SimulatedSource(info, lambda _batch: None, battery=lambda _k, v: readings.append(v))
+    source.start()
+    try:
+        # start() reports the initial level synchronously before any drain.
+        assert readings, "start() must report battery synchronously"
+        initial = readings[0]
+        assert 15 <= initial <= 95
+
+        # One simulated second of ticks must push exactly one further reading,
+        # one percent lower (never below the floor).
+        source._tick_battery(source._battery_last_emit + 1.0)
+        assert readings[-1] == max(source._battery_floor, initial - 1)
+
+        # Rapid back-to-back ticks are rate-limited to one update per second.
+        before = len(readings)
+        source._tick_battery(source._battery_last_emit + 0.5)
+        assert len(readings) == before
+    finally:
+        source.stop()
+
+
+def test_simulator_battery_floor() -> None:
+    """The simulated cell never drains below its floor."""
+    info = DeviceInfo(key="left", label="Left", mac="SIM-LEFT", name="Simulated Myo")
+    readings: list[int] = []
+    source = SimulatedSource(info, lambda _batch: None, battery=lambda _k, v: readings.append(v))
+    source._battery_level = source._battery_floor
+    source._tick_battery(source._battery_last_emit + 1.0)
+    assert readings[-1] == source._battery_floor
+    # Idempotent at the floor: more elapsed time does not keep pushing.
+    before = len(readings)
+    source._tick_battery(source._battery_last_emit + 2.0)
+    assert len(readings) == before + 1  # emits again, but the level holds
+    assert readings[-1] == source._battery_floor
+
+
+class _StopLoop(Exception):
+    """Sentinel to break out of the (infinite) battery loop under test."""
+
+
+def _make_adapter(info: DeviceInfo, readings: dict[str, int]) -> adapter_mod.DlMyoSource:
+    """Build a DlMyoSource via ``__new__`` so no dl-myo install is needed."""
+    source = adapter_mod.DlMyoSource.__new__(adapter_mod.DlMyoSource)
+    source.info = info
+    source._battery = lambda key, level: readings.__setitem__(key, level)
+    return source
+
+
+def test_adapter_battery_loop_reports_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The adapter's battery loop forwards levels; a failed read keeps the last one."""
+    info = DeviceInfo(key="real", label="Real", mac="D2:3B:85:94:32:8E", name="Myo")
+    readings: dict[str, int] = {}
+    source = _make_adapter(info, readings)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def battery_level(self) -> int:
+            self.calls += 1
+            if self.calls == 1:
+                return 84
+            raise RuntimeError("link dropped")
+
+    # Break the loop after its first sleep so the test stays instant: the first
+    # read has already reported 84, and the 60 s cadence is irrelevant here.
+    async def fake_sleep(_seconds: float) -> None:
+        raise _StopLoop
+
+    monkeypatch.setattr(adapter_mod.asyncio, "sleep", fake_sleep)
+    with contextlib.suppress(_StopLoop):
+        asyncio.run(source._battery_loop(FakeClient()))
+    assert readings == {"real": 84}
+
+    # A failing first read must not crash the loop nor publish anything.
+    class DeadClient:
+        async def battery_level(self) -> int:
+            raise RuntimeError("link dropped")
+
+    silent: dict[str, int] = {}
+    source2 = _make_adapter(info, silent)
+    with contextlib.suppress(_StopLoop):
+        asyncio.run(source2._battery_loop(DeadClient()))
+    assert silent == {}

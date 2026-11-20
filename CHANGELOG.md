@@ -7,6 +7,11 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Battery level shown per device: a color-coded `battery N%` label in each
+  device panel (red ≤ 15%, amber ≤ 40%) and in the status-bar health line, fed
+  from both the BLE adapter's periodic read (~60 s) and the simulated source's
+  draining cell. Covered by fake-battery callback tests for the simulator
+  drain/floor and the adapter's battery loop (including failed-read recovery).
 - GUI with live 8-channel EMG oscilloscope and IMU traces per armband.
 - Mypy typing coverage extended to `tests/` (alongside `src/myopyc`), with current
   typing issues fixed and checks wired into `make lint` and CI.
