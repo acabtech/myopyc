@@ -7,6 +7,12 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Data-format spec audit/closure for v0.2 additive fields: [`docs/data-format.md`](docs/data-format.md)
+  now explicitly documents optional top-level `notes` and `markers`, the optional
+  `event` stream kind, and the append-only evolution contract with known v0.2
+  additive-field examples while keeping `FORMAT_VERSION == 1`; closes the
+  corresponding v0.2 milestone item.
+
 - NumPy → lab-software interchange recipe
   ([`docs/interop-lab-software.md`](docs/interop-lab-software.md)): documents
   read-only post-hoc import of recorded sessions via
