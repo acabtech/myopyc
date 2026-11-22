@@ -23,6 +23,7 @@ from myopyc.streams.health import DeviceHealth, RateTracker, format_status_line
 from myopyc.streams.live import LiveBuffer
 from myopyc.streams.schema import EVENT_TYPE_NAMES, StreamKind
 from myopyc.ui.plots import DeviceView
+from myopyc.ui.sessions_dock import SessionsDock
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_toolbar()
         self._build_central()
         self._build_marker_shortcuts()
+        self._build_sessions_dock()
 
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(40)
@@ -186,7 +188,13 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addAction(stop_action)
 
         toolbar.addSeparator()
-        open_action = QtGui.QAction("Open sessions", self)
+        self.sessions_action = QtGui.QAction("Sessions", self)
+        self.sessions_action.setCheckable(True)
+        self.sessions_action.setChecked(True)
+        self.sessions_action.toggled.connect(self._toggle_sessions_dock)
+        toolbar.addAction(self.sessions_action)
+
+        open_action = QtGui.QAction("Open folder", self)
         open_action.triggered.connect(self._open_output_dir)
         toolbar.addAction(open_action)
 
@@ -207,6 +215,36 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_label.setObjectName("streamHealth")
         self._status_label.setStyleSheet("color: #9aa4b2;")
         self.statusBar().addPermanentWidget(self._status_label)
+
+    def _build_sessions_dock(self) -> None:
+        """Right-side sessions dock: list/open/rename/delete recorded sessions."""
+
+        self._sessions_dock = SessionsDock(
+            lambda: self.output_dir,
+            lambda: self._recorder.session_dir if self._recorder is not None else None,
+            self,
+        )
+        self._sessions_dock.message.connect(self.statusBar().showMessage)
+        self._sessions_dock.session_opened.connect(self._on_session_opened)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, self._sessions_dock)
+        self._sessions_dock.refresh()
+
+    def _toggle_sessions_dock(self, visible: bool) -> None:
+        self._sessions_dock.setVisible(visible)
+        # Keep the toolbar check in sync when the dock itself is closed via
+        # its own close button, so the toggle never drifts out of step.
+        if visible != self.sessions_action.isChecked():
+            self.sessions_action.setChecked(visible)
+
+    def _on_session_opened(self, session_dir: Path) -> None:
+        """Refresh the dock after a session open (e.g. post-recording state)."""
+
+        self._sessions_dock.refresh()
+
+    def refresh_sessions(self) -> None:
+        """Public hook: rebuild the sessions list (called after recordings end)."""
+
+        self._sessions_dock.refresh()
 
     # ------------------------------------------------------------------ devices
     def _add_simulated(self) -> None:
@@ -427,6 +465,8 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:
             log.exception("could not finalise recording")
             self.statusBar().showMessage(f"recording finalise failed: {exc}", 8000)
+        finally:
+            self.refresh_sessions()
 
     # ------------------------------------------------------------------ tick
     def _tick(self) -> None:

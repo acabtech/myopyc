@@ -7,6 +7,19 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- GUI sessions dock (first slice of the v0.2 session-management milestone):
+  a right-side dock lists recorded sessions in the output directory (newest
+  first) with sample/chunk counts and status, refreshed automatically when a
+  recording is finalised. Sessions can be opened (summary dialog with
+  devices, samples, drops, chunks, gaps and marker count), renamed (safe —
+  manifest chunk paths are relative) and deleted (with confirmation); the
+  session currently being recorded is protected from both rename and delete.
+  The toolbar's "Open sessions" action became a checkable "Sessions" dock
+  toggle plus an "Open folder" action. Unreadable manifests still list (so
+  they can be inspected/deleted) with a placeholder description. Covered by
+  offscreen Qt tests (listing, open/summary round trip, broken-manifest
+  handling, rename validation/collisions, delete confirmation, active-session
+  protection, post-recording refresh, dock toggle).
 - Session markers (first slice of the v0.2 event markers & annotations
   milestone): a timestamped, session-scoped annotation model (`label`,
   host-monotonic `t_ns`, optional free-text `note`) persisted as a new

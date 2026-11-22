@@ -12,7 +12,8 @@ The toolbar provides:
 - **Add simulated arm** — mount a second fake armband for UI testing.
 - **Connect Myo...** — enter a MAC address and a label; the binding is saved.
 - **Restart streams / Stop streams** — recover from a BLE hiccup.
-- **Open sessions** — open the session root in your file manager.
+- **Sessions** — toggle the sessions dock (see below).
+- **Open folder** — open the session root in your file manager.
 
 Each armband panel shows connection state, battery (when available), the latest
 orientation quaternion, an 8-channel EMG oscilloscope and accelerometer traces.
@@ -30,6 +31,24 @@ The simulated armband also emits discrete gesture events (fist, waves, double
 click) on a random multi-second cadence. Being event-driven, they carry no rate
 expectation: the status bar shows them as `event <n> in window`, and a quiet
 window is reported as idle rather than flagged as a stall.
+
+## Sessions dock
+
+The right-side **Sessions** dock lists every recorded session in the current
+output directory (newest first) with sample counts, chunk counts and status.
+Selecting a session enables the action buttons:
+
+- **Open** (or double-click the entry) — shows the session summary: devices,
+  samples, dropped samples, chunks, gaps and marker count. Playback through
+  the plots is planned for a later release.
+- **Rename…** — renames the session directory. Manifest chunk paths are
+  relative, so renaming is safe; the recording currently in progress cannot
+  be renamed.
+- **Delete…** — removes the session directory and all its data after a
+  confirmation dialog. The open recording cannot be deleted.
+
+The list refreshes automatically when a recording is finalised; use
+**Refresh** after recording sessions from outside the app.
 
 ## Recording
 
