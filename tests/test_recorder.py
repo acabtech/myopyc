@@ -176,7 +176,9 @@ def test_event_stream_readable_via_session_reader_like_emg_imu(tmp_path) -> None
 
     # Summary exposes EVENT rows with the same shape/count semantics.
     event_rows = [row for row in reader.summary()["streams"] if row["stream"] == "event"]
-    assert {(row["device"], row["samples"], row["dropped"], row["chunks"]) for row in event_rows} == {
+    assert {
+        (row["device"], row["samples"], row["dropped"], row["chunks"]) for row in event_rows
+    } == {
         ("left", 3, 0, 1),
         ("right", 1, 0, 1),
     }
@@ -360,7 +362,11 @@ def test_flush_oserror_after_save_does_not_double_count(tmp_path, monkeypatch) -
     calls = {"n": 0}
 
     def flaky_stat(self: Path, *args, **kwargs):
-        if self.name.startswith("chunk-") and self.suffix == ".npy" and "left/emg" in self.as_posix():
+        if (
+            self.name.startswith("chunk-")
+            and self.suffix == ".npy"
+            and "left/emg" in self.as_posix()
+        ):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise OSError("simulated post-save stat failure")

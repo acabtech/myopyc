@@ -26,7 +26,9 @@ RECT_PEN = pg.mkPen("#8a8a8a", width=1, style=QtCore.Qt.PenStyle.DashLine)
 MARKER_PEN = pg.mkPen("#ffd166", width=1, style=QtCore.Qt.PenStyle.DashLine)
 
 
-def _notch_biquad_coeffs(freq_hz: float, sample_rate_hz: float, q: float = 30.0) -> tuple[float, ...]:
+def _notch_biquad_coeffs(
+    freq_hz: float, sample_rate_hz: float, q: float = 30.0
+) -> tuple[float, ...]:
     """Second-order IIR notch (biquad) coefficients, normalized so ``a0 == 1``.
 
     The filter removes a narrow band around ``freq_hz`` (e.g. mains 50/60 Hz).

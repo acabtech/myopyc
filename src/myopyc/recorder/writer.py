@@ -75,10 +75,11 @@ class SessionRecorder:
         self.max_ram_bytes = max(1, int(max_ram_bytes))
         self._resuming = _resume_session_dir is not None
 
+        self._markers: list[Marker] = []
         if self._resuming:
-            if _resume_manifest is None:
-                raise ValueError("resume manifest is required when resuming")
-            self.session_dir = Path(_resume_session_dir)
+            if _resume_manifest is None or _resume_session_dir is None:
+                raise ValueError("resume manifest and session dir are required when resuming")
+            self.session_dir = _resume_session_dir
             self.session_id = str(_resume_manifest.get("session_id") or self.session_dir.name)
         else:
             stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -111,6 +112,7 @@ class SessionRecorder:
         self._gaps: list[dict[str, Any]] = []
 
         if self._resuming:
+            assert _resume_manifest is not None
             self._manifest = dict(_resume_manifest)
             self._load_resume_state()
             if markers:
@@ -159,7 +161,9 @@ class SessionRecorder:
             self._started = True
             self._thread = threading.Thread(target=self._run, name="myopyc-recorder", daemon=True)
             self._thread.start()
-        log.info("%s to %s", "resuming recording" if self._resuming else "recording", self.session_dir)
+        log.info(
+            "%s to %s", "resuming recording" if self._resuming else "recording", self.session_dir
+        )
         return self.session_dir
 
     def stop(self) -> Path:
@@ -298,9 +302,7 @@ class SessionRecorder:
                 self._chunk_index[skey] = self._next_chunk_index(key, kind, chunks)
         self._manifest["devices"] = manifest_devices
 
-    def _next_chunk_index(
-        self, device: str, kind: StreamKind, chunks: list[dict[str, Any]]
-    ) -> int:
+    def _next_chunk_index(self, device: str, kind: StreamKind, chunks: list[dict[str, Any]]) -> int:
         """Compute next chunk index, never colliding with existing chunk files."""
 
         indices: list[int] = []

@@ -16,8 +16,8 @@ from pathlib import Path
 from myopyc.recorder import load_session
 
 session = load_session(Path("~/.local/share/myopyc/sessions/<session>").expanduser())
-emg = session["left"]["emg"].samples   # structured NumPy array, EMG_DTYPE
-imu = session["left"]["imu"].samples   # structured NumPy array, IMU_DTYPE
+emg = session["left"]["emg"].samples  # structured NumPy array, EMG_DTYPE
+imu = session["left"]["imu"].samples  # structured NumPy array, IMU_DTYPE
 ```
 
 `load_session()` returns `SessionData` containing per-device `DeviceData` and

@@ -352,7 +352,9 @@ def test_thread_main_retries_and_reports_reconnecting(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(adapter_mod.asyncio, "new_event_loop", lambda: FakeLoop())
     monkeypatch.setattr(adapter_mod.asyncio, "set_event_loop", lambda _loop: None)
-    monkeypatch.setattr(adapter_mod, "reconnect_delay_s", lambda attempt: 2.0 if attempt == 1 else 4.0)
+    monkeypatch.setattr(
+        adapter_mod, "reconnect_delay_s", lambda attempt: 2.0 if attempt == 1 else 4.0
+    )
     monkeypatch.setattr(source, "_sleep_before_reconnect", lambda delay: delays.append(delay))
 
     source._thread_main()

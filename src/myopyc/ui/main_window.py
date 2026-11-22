@@ -7,13 +7,14 @@ import contextlib
 import logging
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from myopyc.config import AppConfig, save_config
 from myopyc.devices.adapter import dl_myo_available
-from myopyc.devices.discovery import discover_myos, release_bluez_connection
+from myopyc.devices.discovery import DiscoveredMyo, discover_myos, release_bluez_connection
 from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
 from myopyc.recorder.markers import Marker, markers_from_manifest
@@ -67,6 +68,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.manager.subscribe(self._on_samples)
         self._views: dict[str, DeviceView] = {}
         self._recorder: SessionRecorder | None = None
+        self._interrupted_session_action_chooser: Callable[[Path], str] | None = None
         self._health = RateTracker()
         self._last_health_mono: float | None = None
         self._status_label: QtWidgets.QLabel | None = None
@@ -106,6 +108,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if config.ui.auto_start_streaming and self.manager.keys:
             self.manager.start_all()
 
+        self._discovery_thread: threading.Thread | None = None
         if not self.manager.keys and dl_myo_available():
             # No devices requested: probe for nearby/OS-connected Myos in the
             # background and connect whatever is found, so a plain `myopyc`
@@ -115,8 +118,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 target=self._auto_discover, name="myo-discovery", daemon=True
             )
             self._discovery_thread.start()
-        else:
-            self._discovery_thread = None
 
         # Deferred so the main window is visible before a modal prompt appears.
         QtCore.QTimer.singleShot(0, self._prompt_interrupted_sessions)
@@ -582,9 +583,7 @@ class MainWindow(QtWidgets.QMainWindow):
             save_config(self.config)
         except OSError:
             log.exception("could not persist derived-channel toggle")
-        self.statusBar().showMessage(
-            f"derived channels {'on' if checked else 'off'}", 4000
-        )
+        self.statusBar().showMessage(f"derived channels {'on' if checked else 'off'}", 4000)
 
     def _toggle_notch(self, checked: bool) -> None:
         """Set per-channel notch frequency used by derived EMG overlays."""
@@ -597,9 +596,7 @@ class MainWindow(QtWidgets.QMainWindow):
             save_config(self.config)
         except OSError:
             log.exception("could not persist notch toggle")
-        self.statusBar().showMessage(
-            f"notch {'60 Hz' if checked else 'off'}", 4000
-        )
+        self.statusBar().showMessage(f"notch {'60 Hz' if checked else 'off'}", 4000)
 
     def _toggle_gesture_annotations(self, checked: bool) -> None:
         self.config.ui.gesture_annotations = checked
@@ -850,7 +847,9 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
         dropped = self._recorder.stats()["dropped_samples"] if self._recorder is not None else 0
-        overflow_warning = self._update_overflow_warning(dropped) if self._recorder is not None else False
+        overflow_warning = (
+            self._update_overflow_warning(dropped) if self._recorder is not None else False
+        )
         if self._recorder is None:
             self._reset_overflow_warning()
         line = format_status_line(devices, dropped=dropped, overflow_warning=overflow_warning)
@@ -885,7 +884,7 @@ class _MyoPickerDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("Connect Myo")
         self.setMinimumSize(460, 340)
-        self._entries: dict[str, object] = {}  # mac -> DiscoveredMyo
+        self._entries: dict[str, DiscoveredMyo] = {}
         self._scan_done = False
         self._scanning = False
 
@@ -1006,9 +1005,9 @@ class _MyoPickerDialog(QtWidgets.QDialog):
         self._ok.setEnabled(True)
 
     # -- results ------------------------------------------------------------
-    def selected_entries(self) -> list[tuple[object, str]]:
+    def selected_entries(self) -> list[tuple[DiscoveredMyo, str]]:
         """Return checked entries with a Left/Right label assigned in order."""
-        picks: list[tuple[object, str]] = []
+        picks: list[tuple[DiscoveredMyo, str]] = []
         for row in range(self._list.count()):
             item = self._list.item(row)
             if item.checkState() != QtCore.Qt.CheckState.Checked:

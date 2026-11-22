@@ -254,7 +254,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
     flush_interval = args.flush_interval or config.recorder.flush_interval_s
 
     manager = DeviceManager()
-    ble = _parse_ble(args.ble)
+    ble: list[tuple[str, str]] | None = _parse_ble(args.ble)
     if not args.simulate and not ble and sys.stdin.isatty():
         # Plain interactive run: scan and let the user pick from a list.
         ble = _interactive_device_picker(config)
@@ -266,7 +266,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
         ble = _discover_ble_devices(config)
     for _ in range(min(args.simulate, 2)):
         manager.add_simulated()
-    for mac, label in ble:
+    for mac, label in ble or []:
         manager.add_ble(mac, label)
     if not manager.keys:
         print("nothing to record: pass --simulate or --ble", file=sys.stderr)
