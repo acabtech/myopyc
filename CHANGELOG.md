@@ -19,6 +19,12 @@ Keep a Changelog and the project uses semantic versioning.
   (default off) and honored when new armbands mount. Covered by offscreen
   Qt tests (visibility flip on open views, config round trip, envelope math
   against a constant signal, stale-geometry clearing).
+- **Marker lanes/overlay (event markers milestone, remainder of `114`):** session
+  markers render as vertical dashed amber lines labeled on the shared
+  host-monotonic `t_ns` axis on both EMG and IMU plots. Live recording views
+  refresh markers from the active recorder manifest when a marker is injected;
+  read-only playback renders the session's persisted markers at the current
+  playhead window. Covered by offscreen Qt tests in `tests/test_marker_overlay.py`.
 - Read-only session playback (session-management milestone): opening a
   session from the Sessions dock (Open button or double-click) loads the
   recorded EMG/IMU chunks through the same per-device plot widgets used for

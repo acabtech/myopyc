@@ -16,7 +16,7 @@ from myopyc.devices.adapter import dl_myo_available
 from myopyc.devices.discovery import discover_myos, release_bluez_connection
 from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
-from myopyc.recorder.markers import Marker
+from myopyc.recorder.markers import Marker, markers_from_manifest
 from myopyc.recorder.reader import SessionReader, find_sessions
 from myopyc.recorder.writer import SessionRecorder
 from myopyc.streams.health import DeviceHealth, RateTracker, format_status_line
@@ -150,8 +150,28 @@ class MainWindow(QtWidgets.QMainWindow):
             log.exception("could not inject marker")
             self.statusBar().showMessage(f"marker failed: {exc}", 4000)
             return False
+        self._refresh_live_markers()
         self.statusBar().showMessage(f"marker '{label}' recorded", 4000)
         return True
+
+    def _current_live_markers(self) -> list[Marker]:
+        """Markers for the active recording, or an empty list when idle."""
+
+        if self._recorder is None:
+            return []
+        manifest = getattr(self._recorder, "_manifest", None)
+        if not isinstance(manifest, dict):
+            return []
+        return markers_from_manifest(manifest)
+
+    def _refresh_live_markers(self) -> None:
+        """Push current session markers into live (non-playback) views."""
+
+        if self._playback is not None and self._playback.active:
+            return
+        markers = self._current_live_markers()
+        for view in self._views.values():
+            view.set_markers(markers)
 
     # ------------------------------------------------------------------ building
     def _build_toolbar(self) -> None:
@@ -315,6 +335,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._views = self._live_views()
         self._rebuild_grid()
+        self._refresh_live_markers()
         assert self._playback_bar is not None
         self._playback_bar.clear()
         self._playback_bar.setVisible(False)
@@ -593,6 +614,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._recorder = recorder
         self.record_action.setText("Stop recording")
+        self._refresh_live_markers()
         self.setWindowTitle(f"myopyc - recording {recorder.session_dir.name}")
 
     def _stop_recording(self) -> None:
@@ -600,6 +622,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recorder = None
         self.record_action.setText("Record")
         self.setWindowTitle("myopyc - Myo EMG/IMU capture")
+        self._refresh_live_markers()
         if recorder is None:
             return
         try:

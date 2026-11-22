@@ -107,8 +107,16 @@ summary, then exits.
 
 ### Markers
 
-Pass a JSONL marker file to inject pre-planned annotations into the session
-manifest (one JSON object per line; blank lines and `#` comments are skipped):
+Markers are timestamped session annotations on the shared host-monotonic `t_ns`
+axis. They appear as vertical dashed amber lines labeled on EMG/IMU plots during
+live recording and read-only playback, and they are listed in `inspect`/manifest.
+
+- **GUI (live recording):** press `M, 1` … `M, 9` (chord) to inject `marker-1` …
+  `marker-9` at the current host-monotonic time. The status bar confirms the
+  injection; a hint is shown if no recording is active.
+- **Headless:** pass a JSONL marker file to inject pre-planned annotations into
+  the session manifest (one JSON object per line; blank lines and `#` comments
+  are skipped):
 
 ```bash
 # markers.jsonl

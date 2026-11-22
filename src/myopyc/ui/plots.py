@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
 from myopyc.devices.model import DeviceInfo
+from myopyc.recorder.markers import Marker
 from myopyc.streams.live import LiveBuffer
 from myopyc.streams.schema import EMG_CHANNELS, StreamKind
 
@@ -18,6 +21,9 @@ CHANNEL_PENS = [
 # greys/weights so the raw per-channel colors stay unambiguous underneath.
 RMS_PEN = pg.mkPen("#e8e8e8", width=2)
 RECT_PEN = pg.mkPen("#8a8a8a", width=1, style=QtCore.Qt.PenStyle.DashLine)
+
+
+MARKER_PEN = pg.mkPen("#ffd166", width=1, style=QtCore.Qt.PenStyle.DashLine)
 
 
 class EmgPlot(pg.PlotWidget):
@@ -42,6 +48,8 @@ class EmgPlot(pg.PlotWidget):
         ]
         self._rms_curve = self.plot(pen=RMS_PEN, visible=False)
         self._derived_curves.append(self._rms_curve)
+        self._markers: list[Marker] = []
+        self._marker_lines: list[pg.InfiniteLine] = []
 
     def set_derived_visible(self, visible: bool) -> None:
         """Show or hide the rectified/RMS overlays without touching raw curves."""
@@ -53,12 +61,52 @@ class EmgPlot(pg.PlotWidget):
             for curve in self._derived_curves:
                 curve.setData([])
 
+    def set_markers(self, markers: Sequence[Marker]) -> None:
+        """Replace marker annotations rendered as vertical lines."""
+
+        self._markers = list(markers)
+        self._sync_marker_lines()
+
+    def _sync_marker_lines(self) -> None:
+        # Grow/shrink the pool of InfiniteLines to match current markers.
+        while len(self._marker_lines) < len(self._markers):
+            line = pg.InfiniteLine(angle=90, movable=False, pen=MARKER_PEN)
+            line.setZValue(10)
+            line.hide()
+            self.addItem(line)
+            self._marker_lines.append(line)
+        while len(self._marker_lines) > len(self._markers):
+            line = self._marker_lines.pop()
+            self.removeItem(line)
+        for line, marker in zip(self._marker_lines, self._markers, strict=False):
+            label = str(marker.label)
+            # pyqtgraph renders the label next to the line; keep it short.
+            line.label = label
+            if hasattr(line, "setLabel"):
+                line.setLabel(text=label, color="#ffd166", position=0.95)
+
+    def _update_marker_positions(self, t_end_ns: int) -> None:
+        if not self._markers:
+            return
+        window_start_ns = t_end_ns - int(self.window_s * 1e9)
+        for line, marker in zip(self._marker_lines, self._markers, strict=False):
+            t_ns = int(marker.t_ns)
+            if window_start_ns <= t_ns <= t_end_ns:
+                x = (t_ns - t_end_ns) / 1e9
+                line.setPos(float(x))
+                line.show()
+            else:
+                line.hide()
+
     def update_data(self, samples: np.ndarray) -> None:
         if samples.size == 0:
+            for line in self._marker_lines:
+                line.hide()
             return
         limit = max(1, int(200 * self.window_s))
         samples = np.ascontiguousarray(samples[-limit:])
-        times = np.ascontiguousarray((samples["t_ns"] - samples["t_ns"][-1]) / 1e9)
+        t_end_ns = int(samples["t_ns"][-1])
+        times = np.ascontiguousarray((samples["t_ns"] - t_end_ns) / 1e9)
         derived_visible = any(curve.isVisible() for curve in self._derived_curves)
         rms_stack = []
         for index, curve in enumerate(self._curves):
@@ -70,16 +118,18 @@ class EmgPlot(pg.PlotWidget):
                 rms_stack.append(rect)
         if derived_visible:
             if rms_stack:
+                mean_sq = np.mean(np.square(rms_stack, dtype=np.float32), axis=0)
+                window = min(self.RMS_WINDOW, len(mean_sq))
+                kernel = np.ones(window, dtype=np.float32) / window
+                convolved = np.convolve(mean_sq, kernel, mode="full")
+                start = (len(kernel) - 1) // 2
                 envelope = np.sqrt(
-                    np.convolve(
-                        np.mean(rms_stack, axis=0) ** 2,
-                        np.ones(self.RMS_WINDOW) / self.RMS_WINDOW,
-                        mode="same",
-                    )
+                    np.clip(convolved[start : start + len(mean_sq)], 0.0, None)
                 ).astype(np.float32)
                 self._rms_curve.setData(times, envelope)
             else:
                 self._rms_curve.setData([])
+        self._update_marker_positions(t_end_ns)
 
 
 class ImuPlot(pg.PlotWidget):
@@ -97,17 +147,55 @@ class ImuPlot(pg.PlotWidget):
             self.plot(pen=pg.mkPen("#6bff95", width=1)),
             self.plot(pen=pg.mkPen("#6bb5ff", width=1)),
         ]
+        self._markers: list[Marker] = []
+        self._marker_lines: list[pg.InfiniteLine] = []
+
+    def set_markers(self, markers: Sequence[Marker]) -> None:
+        """Replace marker annotations rendered as vertical lines."""
+
+        self._markers = list(markers)
+        while len(self._marker_lines) < len(self._markers):
+            line = pg.InfiniteLine(angle=90, movable=False, pen=MARKER_PEN)
+            line.setZValue(10)
+            line.hide()
+            self.addItem(line)
+            self._marker_lines.append(line)
+        while len(self._marker_lines) > len(self._markers):
+            line = self._marker_lines.pop()
+            self.removeItem(line)
+        for line, marker in zip(self._marker_lines, self._markers, strict=False):
+            label = str(marker.label)
+            line.label = label
+            if hasattr(line, "setLabel"):
+                line.setLabel(text=label, color="#ffd166", position=0.95)
+
+    def _update_marker_positions(self, t_end_ns: int) -> None:
+        if not self._markers:
+            return
+        window_start_ns = t_end_ns - int(self.window_s * 1e9)
+        for line, marker in zip(self._marker_lines, self._markers, strict=False):
+            t_ns = int(marker.t_ns)
+            if window_start_ns <= t_ns <= t_end_ns:
+                x = (t_ns - t_end_ns) / 1e9
+                line.setPos(float(x))
+                line.show()
+            else:
+                line.hide()
 
     def update_data(self, samples: np.ndarray) -> None:
         if samples.size == 0:
+            for line in self._marker_lines:
+                line.hide()
             return
         limit = max(1, int(50 * self.window_s))
         samples = np.ascontiguousarray(samples[-limit:])
-        times = np.ascontiguousarray((samples["t_ns"] - samples["t_ns"][-1]) / 1e9)
+        t_end_ns = int(samples["t_ns"][-1])
+        times = np.ascontiguousarray((samples["t_ns"] - t_end_ns) / 1e9)
         for index, axis in enumerate(("ax", "ay", "az")):
             self._curves[index].setData(
                 times, np.ascontiguousarray(samples[axis], dtype=np.float32)
             )
+        self._update_marker_positions(t_end_ns)
 
 
 class DeviceView(QtWidgets.QGroupBox):
@@ -209,6 +297,12 @@ class DeviceView(QtWidgets.QGroupBox):
             else:
                 color = "#48d1cc"
             self.battery_label.setStyleSheet(f"color: {color};")
+
+    def set_markers(self, markers: Sequence[Marker]) -> None:
+        """Render the same session markers on both EMG and IMU plots."""
+
+        self.emg.set_markers(markers)
+        self.imu.set_markers(markers)
 
     def refresh(self) -> None:
         emg = self.live.snapshot(self.info.key, StreamKind.EMG)

@@ -342,6 +342,7 @@ class PlaybackController(QtCore.QObject):
                     self._live.append(_batch_from_window(key, stream.kind, window))
             view = self._views.get(key)
             if view is not None:
+                view.set_markers(session.markers)
                 view.refresh()
 
         fraction = self._progress_ns / self._duration_ns if self._duration_ns else 0.0
