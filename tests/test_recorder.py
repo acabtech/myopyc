@@ -134,6 +134,52 @@ def test_event_stream_roundtrip(tmp_path) -> None:
     }
 
 
+def test_event_stream_readable_via_session_reader_like_emg_imu(tmp_path) -> None:
+    """EVENT is readable through SessionReader the same way as EMG/IMU."""
+    recorder = _recorder(tmp_path)
+    recorder.add(make_emg("left", count=4, start_seq=0, t0=1_000_000_000))
+    recorder.add(make_imu("left", count=2, t0=1_000_000_000))
+    recorder.add(
+        make_event(
+            "left",
+            count=3,
+            start_seq=10,
+            t0=1_500_000_000,
+            type_code=EVENT_TYPE_IDS["fist"],
+        )
+    )
+    recorder.add(make_event("right", count=1, type_code=EVENT_TYPE_IDS["double_click"]))
+    recorder.stop()
+
+    reader = SessionReader(recorder.session_dir)
+
+    # load_stream / iter_chunks / chunks parity with other stream kinds
+    event_chunks = reader.chunks("left", StreamKind.EVENT)
+    assert len(event_chunks) == 1
+    assert event_chunks[0]["samples"] == 3
+    iterated = list(reader.iter_chunks("left", "event"))
+    assert len(iterated) == 1
+    np.testing.assert_array_equal(iterated[0], reader.load_stream("left", StreamKind.EVENT))
+
+    loaded = reader.load_stream("left", StreamKind.EVENT)
+    assert loaded.size == 3
+    assert loaded["seq"].tolist() == [10, 11, 12]
+    assert loaded["type"].tolist() == [EVENT_TYPE_IDS["fist"]] * 3
+
+    # SessionData/DeviceData indexing mirrors EMG/IMU access patterns.
+    data = reader.load()
+    assert data["left"][StreamKind.EVENT].samples.size == 3
+    assert data["left"]["event"].samples.size == 3
+    assert data["right"]["event"].samples["type"].tolist() == [EVENT_TYPE_IDS["double_click"]]
+
+    # Summary exposes EVENT rows with the same shape/count semantics.
+    event_rows = [row for row in reader.summary()["streams"] if row["stream"] == "event"]
+    assert {(row["device"], row["samples"], row["dropped"], row["chunks"]) for row in event_rows} == {
+        ("left", 3, 0, 1),
+        ("right", 1, 0, 1),
+    }
+
+
 def summary_kinds(reader: SessionReader) -> set[tuple[str, str]]:
     summary = reader.summary()
     return {(row["device"], row["stream"]) for row in summary["streams"]}
