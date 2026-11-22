@@ -14,8 +14,16 @@ CHANNEL_PENS = [
     pg.mkPen(pg.intColor(index, hues=EMG_CHANNELS), width=1) for index in range(EMG_CHANNELS)
 ]
 
+# Derived-channel overlays drawn on top of the raw EMG traces. Distinct
+# greys/weights so the raw per-channel colors stay unambiguous underneath.
+RMS_PEN = pg.mkPen("#e8e8e8", width=2)
+RECT_PEN = pg.mkPen("#8a8a8a", width=1, style=QtCore.Qt.PenStyle.DashLine)
+
 
 class EmgPlot(pg.PlotWidget):
+    #: RMS envelope window in samples (EMG runs at 200 Hz; 50 samples = 250 ms).
+    RMS_WINDOW = 50
+
     def __init__(self, window_s: float, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.window_s = window_s
@@ -26,6 +34,24 @@ class EmgPlot(pg.PlotWidget):
         self.setMouseEnabled(x=False, y=False)
         self.setMenuEnabled(False)
         self._curves = [self.plot(pen=CHANNEL_PENS[index]) for index in range(EMG_CHANNELS)]
+        # Derived overlays: one RMS envelope (drawn last, on top) and one
+        # rectified trace per channel. Hidden until the toolbar toggle is on;
+        # computing them is skipped entirely while hidden.
+        self._derived_curves: list[pg.PlotDataItem] = [
+            self.plot(pen=RECT_PEN, visible=False) for _ in range(EMG_CHANNELS)
+        ]
+        self._rms_curve = self.plot(pen=RMS_PEN, visible=False)
+        self._derived_curves.append(self._rms_curve)
+
+    def set_derived_visible(self, visible: bool) -> None:
+        """Show or hide the rectified/RMS overlays without touching raw curves."""
+
+        for curve in self._derived_curves:
+            curve.setVisible(visible)
+        if not visible:
+            # Clear stale geometry so a re-enabled view never flashes old data.
+            for curve in self._derived_curves:
+                curve.setData([])
 
     def update_data(self, samples: np.ndarray) -> None:
         if samples.size == 0:
@@ -33,9 +59,27 @@ class EmgPlot(pg.PlotWidget):
         limit = max(1, int(200 * self.window_s))
         samples = np.ascontiguousarray(samples[-limit:])
         times = np.ascontiguousarray((samples["t_ns"] - samples["t_ns"][-1]) / 1e9)
+        derived_visible = any(curve.isVisible() for curve in self._derived_curves)
+        rms_stack = []
         for index, curve in enumerate(self._curves):
             values = np.ascontiguousarray(samples[f"ch{index + 1}"], dtype=np.float32)
             curve.setData(times, values)
+            if derived_visible:
+                rect = np.abs(values)
+                self._derived_curves[index].setData(times, rect)
+                rms_stack.append(rect)
+        if derived_visible:
+            if rms_stack:
+                envelope = np.sqrt(
+                    np.convolve(
+                        np.mean(rms_stack, axis=0) ** 2,
+                        np.ones(self.RMS_WINDOW) / self.RMS_WINDOW,
+                        mode="same",
+                    )
+                ).astype(np.float32)
+                self._rms_curve.setData(times, envelope)
+            else:
+                self._rms_curve.setData([])
 
 
 class ImuPlot(pg.PlotWidget):

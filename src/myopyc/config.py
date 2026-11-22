@@ -61,6 +61,7 @@ class UIConfig:
     imu_window_s: float = 4.0
     auto_start_streaming: bool = True
     gesture_annotations: bool = True
+    derived_channels: bool = False
 
 
 @dataclass
@@ -118,6 +119,7 @@ class AppConfig:
             imu_window_s=float(ui_raw.get("imu_window_s", 4.0)),
             auto_start_streaming=bool(ui_raw.get("auto_start_streaming", True)),
             gesture_annotations=bool(ui_raw.get("gesture_annotations", True)),
+            derived_channels=bool(ui_raw.get("derived_channels", False)),
         )
         return cls(
             version=int(raw.get("version", CONFIG_VERSION)),

@@ -174,6 +174,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gesture_action.toggled.connect(self._toggle_gesture_annotations)
         toolbar.addAction(self.gesture_action)
 
+        # Derived EMG channels (rectified / RMS envelope): GUI-only overlays,
+        # never written into recorded data. Off by default.
+        self.derived_action = QtGui.QAction("Derived channels", self)
+        self.derived_action.setCheckable(True)
+        self.derived_action.setChecked(self.config.ui.derived_channels)
+        self.derived_action.toggled.connect(self._toggle_derived_channels)
+        toolbar.addAction(self.derived_action)
+
         self.add_arm_action = QtGui.QAction("Add simulated arm", self)
         self.add_arm_action.triggered.connect(self._add_simulated)
         toolbar.addAction(self.add_arm_action)
@@ -319,13 +327,7 @@ class MainWindow(QtWidgets.QMainWindow):
         views: dict[str, DeviceView] = {}
         for key in self.manager.keys:
             info = self.manager.info(key)
-            view = DeviceView(
-                info,
-                self.live,
-                emg_window_s=self.config.ui.emg_window_s,
-                imu_window_s=self.config.ui.imu_window_s,
-            )
-            views[key] = view
+            views[key] = self._make_view(info)
         return views
 
     def _on_playback_progress(self, current_s: float, total_s: float, fraction: float) -> None:
@@ -334,6 +336,18 @@ class MainWindow(QtWidgets.QMainWindow):
         assert self._playback_bar is not None
         self._playback_bar.set_position(current_s, total_s)
         self._playback_bar.set_slider(round(fraction * SLIDER_STEPS))
+
+    def _make_view(self, info: DeviceInfo) -> DeviceView:
+        """Build a DeviceView honoring the current config (windows, overlays)."""
+
+        view = DeviceView(
+            info,
+            self.live,
+            emg_window_s=self.config.ui.emg_window_s,
+            imu_window_s=self.config.ui.imu_window_s,
+        )
+        view.emg.set_derived_visible(self.config.ui.derived_channels)
+        return view
 
     def _on_playback_scrub(self, value: int) -> None:
         assert self._playback is not None
@@ -474,12 +488,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # the status bar explains that new devices wait for it to close.
             self.statusBar().showMessage("close playback before adding armbands", 4000)
             return
-        view = DeviceView(
-            info,
-            self.live,
-            emg_window_s=self.config.ui.emg_window_s,
-            imu_window_s=self.config.ui.imu_window_s,
-        )
+        view = self._make_view(info)
         self._views[info.key] = view
         self._rebuild_grid()
 
@@ -526,6 +535,20 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 # Sources emit from their own threads; marshal onto the Qt thread.
                 _call_on_ui_thread(self, lambda v=view, n=name: v.announce_event(n))
+
+    def _toggle_derived_channels(self, checked: bool) -> None:
+        """Apply the derived-channel overlay toggle to every open EMG plot."""
+
+        self.config.ui.derived_channels = checked
+        for view in self._views.values():
+            view.emg.set_derived_visible(checked)
+        try:
+            save_config(self.config)
+        except OSError:
+            log.exception("could not persist derived-channel toggle")
+        self.statusBar().showMessage(
+            f"derived channels {'on' if checked else 'off'}", 4000
+        )
 
     def _toggle_gesture_annotations(self, checked: bool) -> None:
         self.config.ui.gesture_annotations = checked

@@ -9,6 +9,13 @@ myopyc gui --simulate 1
 The toolbar provides:
 
 - **Record / Stop recording** — start or finalise a session (Ctrl+R).
+- **Gesture annotations** — toggleable suppression of gesture flash labels.
+- **Derived channels** — checkable EMG overlays: per-channel **rectified**
+  traces (dashed grey) and a combined **RMS envelope** (bold light curve,
+  a 250 ms moving window over the channel mean) drawn on top of the raw
+  oscilloscope. This is a display-only aid for spotting bursts and
+  saturation; it never alters recorded data, and the choice is persisted
+  (`ui.derived_channels` in `config.toml`, default off).
 - **Add simulated arm** — mount a second fake armband for UI testing.
 - **Connect Myo...** — enter a MAC address and a label; the binding is saved.
 - **Restart streams / Stop streams** — recover from a BLE hiccup.

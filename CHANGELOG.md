@@ -7,6 +7,18 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Derived EMG channel overlays (signal-quality milestone, GUI-only slice):
+  a checkable "Derived channels" toolbar action draws per-channel rectified
+  traces (dashed grey) and a combined RMS envelope (bold light curve,
+  250 ms moving window over the channel mean) on top of the raw EMG
+  oscilloscope in every `DeviceView` — live and playback alike. The
+  computation happens only while the toggle is on, hides with stale
+  geometry cleared so re-enabling never flashes old data, and never alters
+  recorded raw data (plots consume the live/playback buffers only). The
+  toggle is persisted as `ui.derived_channels` in `config.toml`
+  (default off) and honored when new armbands mount. Covered by offscreen
+  Qt tests (visibility flip on open views, config round trip, envelope math
+  against a constant signal, stale-geometry clearing).
 - Read-only session playback (session-management milestone): opening a
   session from the Sessions dock (Open button or double-click) loads the
   recorded EMG/IMU chunks through the same per-device plot widgets used for
