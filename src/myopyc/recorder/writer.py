@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -74,10 +75,11 @@ class SessionRecorder:
         self.max_ram_bytes = max(1, int(max_ram_bytes))
         self._resuming = _resume_session_dir is not None
 
+        self._markers: list[Marker] = []
         if self._resuming:
-            if _resume_manifest is None:
-                raise ValueError("resume manifest is required when resuming")
-            self.session_dir = Path(_resume_session_dir)
+            if _resume_manifest is None or _resume_session_dir is None:
+                raise ValueError("resume manifest and session dir are required when resuming")
+            self.session_dir = _resume_session_dir
             self.session_id = str(_resume_manifest.get("session_id") or self.session_dir.name)
         else:
             stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -93,6 +95,7 @@ class SessionRecorder:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._started = False
+        self._stopping = False
         self._stopped = False
 
         self._buffers: dict[tuple[str, StreamKind], list[np.ndarray[Any, Any]]] = {
@@ -109,6 +112,7 @@ class SessionRecorder:
         self._gaps: list[dict[str, Any]] = []
 
         if self._resuming:
+            assert _resume_manifest is not None
             self._manifest = dict(_resume_manifest)
             self._load_resume_state()
             if markers:
@@ -126,7 +130,7 @@ class SessionRecorder:
     # ------------------------------------------------------------------ lifecycle
     @property
     def recording(self) -> bool:
-        return self._started and not self._stopped
+        return self._started and not self._stopping and not self._stopped
 
     @property
     def manifest_path(self) -> Path:
@@ -157,7 +161,9 @@ class SessionRecorder:
             self._started = True
             self._thread = threading.Thread(target=self._run, name="myopyc-recorder", daemon=True)
             self._thread.start()
-        log.info("%s to %s", "resuming recording" if self._resuming else "recording", self.session_dir)
+        log.info(
+            "%s to %s", "resuming recording" if self._resuming else "recording", self.session_dir
+        )
         return self.session_dir
 
     def stop(self) -> Path:
@@ -168,6 +174,7 @@ class SessionRecorder:
                 raise RuntimeError("recorder was never started")
             if self._stopped:
                 return self.session_dir
+            self._stopping = True
         self._stop_event.set()
         thread = self._thread
         if thread is not None:
@@ -175,9 +182,28 @@ class SessionRecorder:
             if thread.is_alive():
                 log.warning("recorder writer thread did not stop cleanly")
 
-        self._flush_all()
+        # Drain until quiescent. New add() calls are rejected while stopping so
+        # samples accepted before this point are either flushed or, on persistent
+        # write failure, remain buffered and reported.
+        for _ in range(10):
+            self._flush_all()
+            with self._lock:
+                has_pending = any(self._buffers[key] for key in self._buffers)
+                if not has_pending:
+                    break
+            time.sleep(0.05)
+        else:
+            with self._lock:
+                pending = sum(len(self._buffers[key]) for key in self._buffers)
+            if pending:
+                log.error(
+                    "could not flush %d pending buffer(s) during stop; data retained in memory only",
+                    pending,
+                )
+
         with self._lock:
             self._stopped = True
+            self._stopping = False
             self._manifest["status"] = "stopped"
             self._manifest["stopped_utc"] = isoformat(utc_now())
             write_manifest(self.session_dir, self._manifest)
@@ -276,9 +302,7 @@ class SessionRecorder:
                 self._chunk_index[skey] = self._next_chunk_index(key, kind, chunks)
         self._manifest["devices"] = manifest_devices
 
-    def _next_chunk_index(
-        self, device: str, kind: StreamKind, chunks: list[dict[str, Any]]
-    ) -> int:
+    def _next_chunk_index(self, device: str, kind: StreamKind, chunks: list[dict[str, Any]]) -> int:
         """Compute next chunk index, never colliding with existing chunk files."""
 
         indices: list[int] = []
@@ -330,7 +354,7 @@ class SessionRecorder:
             for key, arrays in pending.items():
                 try:
                     chunk_meta = self._write_chunk(key, arrays)
-                except OSError:
+                except Exception:
                     log.exception("could not write chunk for %s/%s", *key)
                     with self._lock:
                         self._buffers[key][:0] = arrays
@@ -342,6 +366,8 @@ class SessionRecorder:
             with self._lock:
                 for key, chunk_meta in new_chunks:
                     self._chunks[key].append(chunk_meta)
+                    self._chunk_index[key] += 1
+                    self._written[key] += int(chunk_meta["samples"])
                 self._refresh_manifest_counters()
                 write_manifest(self.session_dir, self._manifest)
 
@@ -357,15 +383,25 @@ class SessionRecorder:
         relative = Path("devices") / device / kind.value / CHUNK_FORMAT.format(index=index)
         path = self.session_dir / relative
         data = np.concatenate(arrays) if len(arrays) > 1 else arrays[0]
-        np.save(path, data, allow_pickle=False)
-        self._chunk_index[key] = index + 1
-        self._written[key] += int(data.size)
+        try:
+            np.save(path, data, allow_pickle=False)
+            size = int(path.stat().st_size)
+        except Exception:
+            # Never leave a partial/orphan chunk behind when the write path fails.
+            # Counters are committed by the caller only after a successful return.
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                log.warning("could not remove incomplete chunk %s", path, exc_info=True)
+            raise
         return {
             "file": relative.as_posix(),
             "samples": int(data.size),
             "t_start_ns": int(data["t_ns"][0]),
             "t_end_ns": int(data["t_ns"][-1]),
-            "bytes": int(path.stat().st_size),
+            "bytes": size,
         }
 
     def _refresh_manifest_counters(self) -> None:

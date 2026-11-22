@@ -211,17 +211,26 @@ def test_connection_state_tagged_only_when_not_streaming() -> None:
 
     healthy = _healthy_emg_stream()
     # The steady state (streaming) adds no tag — the line stays short.
-    assert format_device_line(
-        DeviceHealth(key="left", label="Left", streams=(healthy,), connection="streaming")
-    ) == "Left: emg 200/200 Hz"
+    assert (
+        format_device_line(
+            DeviceHealth(key="left", label="Left", streams=(healthy,), connection="streaming")
+        )
+        == "Left: emg 200/200 Hz"
+    )
     # Unknown state (None) renders as nothing, e.g. in unit tests.
-    assert format_device_line(
-        DeviceHealth(key="left", label="Left", streams=(healthy,), connection=None)
-    ) == "Left: emg 200/200 Hz"
+    assert (
+        format_device_line(
+            DeviceHealth(key="left", label="Left", streams=(healthy,), connection=None)
+        )
+        == "Left: emg 200/200 Hz"
+    )
     # A dropped BLE link shows up right in the label.
-    assert format_device_line(
-        DeviceHealth(key="left", label="Left", streams=(healthy,), connection="reconnecting")
-    ) == "Left [reconnecting]: emg 200/200 Hz"
+    assert (
+        format_device_line(
+            DeviceHealth(key="left", label="Left", streams=(healthy,), connection="reconnecting")
+        )
+        == "Left [reconnecting]: emg 200/200 Hz"
+    )
 
 
 def test_reconnecting_device_warns_even_with_no_stall() -> None:
@@ -255,9 +264,12 @@ def test_reconnecting_device_warns_even_with_no_stall() -> None:
     assert unknown.warns is False
 
     # Error state warns too.
-    assert DeviceHealth(
-        key="left", label="Left", streams=(_healthy_emg_stream(),), connection="error"
-    ).warns is True
+    assert (
+        DeviceHealth(
+            key="left", label="Left", streams=(_healthy_emg_stream(),), connection="error"
+        ).warns
+        is True
+    )
 
 
 def test_stalled_stream_still_warns_regardless_of_connection() -> None:

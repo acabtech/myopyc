@@ -17,6 +17,17 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-keysyms1 \
+            libxcb-shape0
       - name: Install
         run: uv sync --extra dev
       - name: Lint

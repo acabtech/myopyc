@@ -6,11 +6,10 @@ flow (offscreen Qt), without requiring real BLE hardware.
 
 from __future__ import annotations
 
-import json
+import contextlib
 import os
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from myopyc.recorder.manifest import read_manifest, write_manifest
@@ -18,7 +17,6 @@ from myopyc.recorder.reader import SessionReader
 from myopyc.recorder.writer import SessionRecorder, find_interrupted_sessions, resume_recorder
 from myopyc.streams.schema import StreamKind
 from tests.conftest import make_emg
-
 
 DEVICES = {
     "left": {"label": "Left", "mac": "SIM-LEFT", "name": "Simulated Myo"},
@@ -132,10 +130,8 @@ def _close(window: MainWindow) -> None:
     window._health_timer.stop()
     window._timer.stop()
     if window._recorder is not None:
-        try:
+        with contextlib.suppress(Exception):
             window._recorder.stop()
-        except Exception:
-            pass
 
 
 def test_gui_startup_prompt_resume(qapp, tmp_path: Path) -> None:
@@ -152,7 +148,9 @@ def test_gui_startup_prompt_resume(qapp, tmp_path: Path) -> None:
         manifest = read_manifest(session_dir)
         assert manifest["status"] == "stopped"
         assert manifest.get("resume_count") == 1
-        names = [Path(c["file"]).name for c in manifest["devices"]["left"]["streams"]["emg"]["chunks"]]
+        names = [
+            Path(c["file"]).name for c in manifest["devices"]["left"]["streams"]["emg"]["chunks"]
+        ]
         assert names[-1] == "chunk-00002.npy"
     finally:
         _close(window)

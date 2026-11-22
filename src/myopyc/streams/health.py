@@ -219,11 +219,7 @@ def format_device_line(device: DeviceHealth) -> str:
     """
 
     streams = ", ".join(_format_stream(s) for s in device.streams)
-    tag = (
-        ""
-        if device.connection in (None, _QUIET_CONNECTION)
-        else f" [{device.connection}]"
-    )
+    tag = "" if device.connection in (None, _QUIET_CONNECTION) else f" [{device.connection}]"
     battery = "" if device.battery is None else f", battery {device.battery}%"
     return f"{device.label}{tag}: {streams}{battery}"
 
