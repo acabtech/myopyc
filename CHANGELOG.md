@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 Keep a Changelog and the project uses semantic versioning.
 
-## [0.2.0.dev0]
+## [0.2.0] - 2026-11-22
 
 ### Added
 
