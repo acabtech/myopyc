@@ -432,14 +432,14 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument(
         "--format",
         default="csv",
-        choices=("csv", "npz"),
+        choices=("csv", "npz", "zip"),
         help="export format (default: csv)",
     )
     export.add_argument(
         "--output",
         type=Path,
         default=None,
-        help="output directory (csv) or file (npz); default: <session>-export",
+        help="output directory (csv) or archive file (npz/zip); default: <session>-export",
     )
     export.set_defaults(func=_cmd_export)
 

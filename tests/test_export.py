@@ -1,14 +1,16 @@
-"""Tests for session export (CSV and NPZ)."""
+"""Tests for session export (CSV, NPZ and ZIP)."""
 
 from __future__ import annotations
 
 import csv
+import json
+import zipfile
 
 import numpy as np
 import pytest
 
 from myopyc.cli import main
-from myopyc.recorder.export import export_session
+from myopyc.recorder.export import export_session, verify_session_zip
 from myopyc.recorder.reader import load_session
 from myopyc.streams.schema import EMG_DTYPE
 from tests.conftest import make_emg, make_event, make_imu
@@ -105,3 +107,93 @@ def test_cli_export_npz(tmp_path, recorded_session, capsys) -> None:
 def test_cli_export_bad_format_exits_2(recorded_session) -> None:
     with pytest.raises(SystemExit):
         main(["export", str(recorded_session), "--format", "xlsx"])
+
+
+def test_zip_export_archives_session_with_integrity(recorded_session, tmp_path) -> None:
+    """The archive holds manifest + chunks + INTEGRITY.json and verifies clean."""
+
+    out = tmp_path / "archive.zip"
+    written = export_session(recorded_session, out, "zip")
+
+    assert written == [out]
+    with zipfile.ZipFile(out) as zf:
+        names = set(zf.namelist())
+        assert "manifest.json" in names
+        assert "INTEGRITY.json" in names
+        assert any(n.startswith("devices/") and n.endswith(".npy") for n in names)
+        listed = json.loads(zf.read("INTEGRITY.json"))["files"]
+        assert set(listed) == names - {"INTEGRITY.json"}
+
+    report = verify_session_zip(out)
+    assert report.ok
+    assert report.checked == len(listed)
+    assert not (report.missing or report.corrupted or report.unexpected)
+
+
+def test_zip_export_adds_suffix(recorded_session, tmp_path) -> None:
+    written = export_session(recorded_session, tmp_path / "no-suffix", "zip")
+    assert written[0].suffix == ".zip"
+
+
+def test_zip_verify_detects_corruption(recorded_session, tmp_path) -> None:
+    """Rewriting a member in place is caught by the digest check."""
+
+    out = export_session(recorded_session, tmp_path / "a.zip", "zip")[0]
+
+    # Rebuild the archive with one chunk file's bytes flipped.
+    src = zipfile.ZipFile(out)
+    names = [n for n in src.namelist() if n.endswith(".npy")]
+    target = names[0]
+    with zipfile.ZipFile(tmp_path / "tampered.zip", "w") as dst:
+        for info in src.infolist():
+            data = src.read(info)
+            if info.filename == target:
+                data = b"\x00" + data[1:]
+            dst.writestr(info.filename, data)
+    src.close()
+
+    report = verify_session_zip(tmp_path / "tampered.zip")
+    assert not report.ok
+    assert report.corrupted == [target]
+    assert report.checked > 0
+
+
+def test_zip_verify_detects_missing_member(recorded_session, tmp_path) -> None:
+    out = export_session(recorded_session, tmp_path / "a.zip", "zip")[0]
+    src = zipfile.ZipFile(out)
+    with zipfile.ZipFile(tmp_path / "short.zip", "w") as dst:
+        for info in src.infolist():
+            if info.filename != "manifest.json":
+                dst.writestr(info.filename, src.read(info))
+    src.close()
+
+    report = verify_session_zip(tmp_path / "short.zip")
+    assert not report.ok
+    assert report.missing == ["manifest.json"]
+
+
+def test_zip_export_roundtrip_matches_source_chunks(recorded_session, tmp_path) -> None:
+    """Archive members are byte-identical to the on-disk session files."""
+
+    out = export_session(recorded_session, tmp_path / "a.zip", "zip")[0]
+    with zipfile.ZipFile(out) as zf:
+        for name in zf.namelist():
+            if name == "INTEGRITY.json":
+                continue
+            assert zf.read(name) == (recorded_session / name).read_bytes()
+
+
+def test_zip_export_requires_manifest(tmp_path) -> None:
+    """A directory without a valid manifest is refused."""
+
+    with pytest.raises(FileNotFoundError):
+        export_session(tmp_path, tmp_path / "out.zip", "zip")
+
+
+def test_cli_export_zip(tmp_path, recorded_session, capsys) -> None:
+    rc = main(["export", str(recorded_session), "--format", "zip"])
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert out.endswith(".zip")
+    report = verify_session_zip(out)
+    assert report.ok

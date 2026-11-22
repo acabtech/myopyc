@@ -185,6 +185,30 @@ device/stream key (empty streams are zero-length typed arrays). The ISO
 timestamp is rendered from the host *monotonic* clock, so it is relative
 time for readability and sorting — not wall-clock truth.
 
+### ZIP archive with integrity check
+
+For archival/transfer, `--format zip` packages the *whole session directory*
+(`manifest.json` plus every chunk file) and generates an `INTEGRITY.json`
+sidecar inside the archive mapping each member to its SHA-256 digest. The
+archive is verified immediately after writing, so a silently corrupted export
+fails loudly instead of shipping bad data:
+
+```bash
+# Archive the whole session (default output: <session>.zip)
+myopyc export <session> --format zip
+myopyc export <session> --format zip --output /tmp/session.zip
+```
+
+To check an archive after a transfer (digest mismatch = corrupted, missing
+member = truncated, unexpected member = tampered/extra):
+
+```python
+from myopyc.recorder.export import verify_session_zip
+
+report = verify_session_zip("/tmp/session.zip")
+assert report.ok, report.as_dict()
+```
+
 ## Reading data in Python
 
 ```python

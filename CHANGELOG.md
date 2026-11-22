@@ -7,6 +7,15 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- ZIP export with manifest integrity check (session-management milestone):
+  `myopyc export <session> --format zip` archives the whole session directory
+  (`manifest.json` plus every chunk file) together with a generated
+  `INTEGRITY.json` sidecar mapping each archived member to its SHA-256 digest.
+  The freshly written archive is verified before the command returns, and
+  `verify_session_zip()` (exported from `myopyc.recorder.export`) recomputes
+  digests after a transfer, reporting missing, corrupted (digest mismatch) and
+  unexpected members separately. Covered by round-trip, tamper-detection,
+  missing-member and CLI tests; documented in `docs/usage.md`.
 - GUI sessions dock (first slice of the v0.2 session-management milestone):
   a right-side dock lists recorded sessions in the output directory (newest
   first) with sample/chunk counts and status, refreshed automatically when a
