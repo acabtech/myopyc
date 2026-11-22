@@ -348,3 +348,104 @@ def test_legacy_v01_reader_skips_event_stream(tmp_path) -> None:
     ]
     assert {row["stream"] for row in rows} == {"emg", "imu"}
     assert not any(row["stream"] == "event" for row in rows)
+
+
+def test_flush_oserror_after_save_does_not_double_count(tmp_path, monkeypatch) -> None:
+    """Issue #2: post-save OSError must not orphan files or inflate counts on retry."""
+
+    recorder = _recorder(tmp_path)
+    recorder.add(make_emg("left", count=4, start_seq=0, t0=1_000_000_000))
+
+    real_stat = Path.stat
+    calls = {"n": 0}
+
+    def flaky_stat(self: Path, *args, **kwargs):
+        if self.name.startswith("chunk-") and self.suffix == ".npy" and "left/emg" in self.as_posix():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("simulated post-save stat failure")
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+    recorder._flush_all()  # first attempt fails after save; should requeue cleanly
+    assert calls["n"] == 1
+
+    monkeypatch.setattr(Path, "stat", real_stat)
+    recorder._flush_all()  # retry should write exactly once
+    recorder.stop()
+
+    manifest = read_manifest(recorder.session_dir)
+    emg = manifest["devices"]["left"]["streams"]["emg"]
+    assert emg["samples"] == 4
+    chunks = emg["chunks"]
+    assert len(chunks) == 1
+    assert Path(chunks[0]["file"]).name == "chunk-00000.npy"
+
+    loaded = SessionReader(recorder.session_dir).load_stream("left", StreamKind.EMG)
+    assert loaded.size == 4
+    assert loaded["seq"].tolist() == [0, 1, 2, 3]
+    # No orphan chunk files left behind.
+    chunk_files = sorted((recorder.session_dir / "devices" / "left" / "emg").glob("chunk-*.npy"))
+    assert [p.name for p in chunk_files] == ["chunk-00000.npy"]
+
+
+def test_flush_non_oserror_write_failure_retains_buffers(tmp_path, monkeypatch) -> None:
+    """Issue #1: any write-path failure must requeue drained buffers, not lose them."""
+
+    recorder = _recorder(tmp_path)
+    recorder.add(make_emg("left", count=3, start_seq=0, t0=1_000_000_000))
+
+    real_write = recorder._write_chunk
+    calls = {"n": 0}
+
+    def flaky_write(key, arrays):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise MemoryError("simulated write-path failure")
+        return real_write(key, arrays)
+
+    monkeypatch.setattr(recorder, "_write_chunk", flaky_write)
+    recorder._flush_all()  # should requeue, not lose data
+
+    with recorder._lock:
+        pending = sum(len(buf) for buf in recorder._buffers.values())
+
+    monkeypatch.setattr(recorder, "_write_chunk", real_write)
+    assert pending >= 1
+
+    recorder._flush_all()
+    recorder.stop()
+
+    manifest = read_manifest(recorder.session_dir)
+    assert manifest["devices"]["left"]["streams"]["emg"]["samples"] == 3
+    loaded = SessionReader(recorder.session_dir).load_stream("left", StreamKind.EMG)
+    assert loaded["seq"].tolist() == [0, 1, 2]
+
+
+def test_stop_drains_samples_buffered_before_finalization(tmp_path) -> None:
+    """Issue #3: stop() must not finalize while accepted samples remain buffered."""
+
+    recorder = _recorder(tmp_path)
+    recorder.add(make_emg("left", count=2, start_seq=0, t0=1_000_000_000))
+
+    real_flush = recorder._flush_all
+    injected = {"done": False}
+
+    def flush_then_inject() -> None:
+        real_flush()
+        if not injected["done"]:
+            injected["done"] = True
+            # Simulate a sample accepted just before stopping became visible.
+            with recorder._lock:
+                if recorder._started and not recorder._stopped:
+                    batch = make_emg("left", count=1, start_seq=2, t0=1_100_000_000)
+                    recorder._buffers[("left", StreamKind.EMG)].append(batch.data)
+                    recorder._buffer_bytes[("left", StreamKind.EMG)] += int(batch.data.nbytes)
+
+    recorder._flush_all = flush_then_inject  # type: ignore[method-assign]
+    recorder.stop()
+
+    manifest = read_manifest(recorder.session_dir)
+    assert manifest["devices"]["left"]["streams"]["emg"]["samples"] == 3
+    loaded = SessionReader(recorder.session_dir).load_stream("left", StreamKind.EMG)
+    assert loaded["seq"].tolist() == [0, 1, 2]
