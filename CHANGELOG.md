@@ -20,7 +20,15 @@ Keep a Changelog and the project uses semantic versioning.
   and the `markers` array is included in `myopyc inspect` summaries (human and
   `--json`). Covered by round-trip writer → manifest → reader tests,
   manifest tolerance tests for malformed entries, JSONL parser tests and CLI
-  tests. GUI marker overlay/keyboard injection is deferred to a follow-up.
+  tests. GUI marker overlay (plot lanes) is deferred to a follow-up.
+- GUI marker injection: while a recording runs, chorded keyboard shortcuts
+  `M 1` … `M 9` drop a marker (labelled `marker-1` … `marker-9`) into the open
+  session at the current timestamp on the same host-monotonic clock the
+  EMG/IMU/EVENT streams use, so markers align exactly with recorded samples.
+  The shortcuts are no-ops with a status-bar hint when no recording is open;
+  each successful injection is confirmed in the status bar. Covered by
+  offscreen Qt tests (injection round trip into the session manifest via
+  `SessionReader.markers` and the no-recording guard).
 - GUI gesture annotations: a fired pose (fist, waves, double click, from either
   the simulated or the real armband) flashes a bold amber `gesture: <name>`
   label on the device panel header for 2 s, then dims to grey as the

@@ -236,9 +236,7 @@ def test_gesture_annotation_suppression_toggle(qapp: QtWidgets.QApplication) -> 
         _close(window)
 
 
-def test_gesture_annotation_config_persisted(
-    qapp: QtWidgets.QApplication, tmp_path
-) -> None:
+def test_gesture_annotation_config_persisted(qapp: QtWidgets.QApplication, tmp_path) -> None:
     """The toggle survives a config save/reload round trip."""
 
     from myopyc.config import load_config, save_config
@@ -250,5 +248,51 @@ def test_gesture_annotation_config_persisted(
         save_config(window.config, path)
         reloaded = load_config(path)
         assert reloaded.ui.gesture_annotations is False
+    finally:
+        _close(window)
+
+
+# ------------------------------------------------------------------ markers
+def _recording_window(qapp: QtWidgets.QApplication, tmp_path) -> MainWindow:
+    """A MainWindow with a real (simulated-device) recording running."""
+
+    window = MainWindow(_config(), simulate=0)
+    window.output_dir = tmp_path
+    info = window.manager.add_simulated("Left")
+    window.record_action.setChecked(True)
+    assert window._recorder is not None
+    _ = info
+    return window
+
+
+def test_marker_shortcut_number_row(qapp: QtWidgets.QApplication, tmp_path) -> None:
+    """``M <digit>`` drops a marker into the open session's manifest."""
+
+    window = _recording_window(qapp, tmp_path)
+    try:
+        assert len(window._marker_shortcuts) == 9
+        assert window._inject_marker("marker-1")
+        window._stop_recording()
+        assert window._recorder is None
+
+        sessions = window.saved_sessions()
+        assert len(sessions) == 1
+        from myopyc.recorder.reader import SessionReader
+
+        markers = SessionReader(sessions[0]).markers
+        assert [m.label for m in markers] == ["marker-1"]
+        assert markers[0].t_ns > 0
+    finally:
+        _close(window)
+
+
+def test_marker_without_recording_is_noop(qapp: QtWidgets.QApplication, tmp_path) -> None:
+    """Without a recording the shortcut explains itself and records nothing."""
+
+    window = MainWindow(_config(), simulate=0)
+    window.output_dir = tmp_path
+    try:
+        assert not window._inject_marker("marker-3")
+        assert window.saved_sessions() == []
     finally:
         _close(window)

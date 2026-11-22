@@ -16,6 +16,7 @@ from myopyc.devices.adapter import dl_myo_available
 from myopyc.devices.discovery import discover_myos, release_bluez_connection
 from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
+from myopyc.recorder.markers import Marker
 from myopyc.recorder.reader import SessionReader, find_sessions
 from myopyc.recorder.writer import SessionRecorder
 from myopyc.streams.health import DeviceHealth, RateTracker, format_status_line
@@ -71,6 +72,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1440, 900)
         self._build_toolbar()
         self._build_central()
+        self._build_marker_shortcuts()
 
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(40)
@@ -103,6 +105,47 @@ class MainWindow(QtWidgets.QMainWindow):
             self._discovery_thread.start()
         else:
             self._discovery_thread = None
+
+    # ------------------------------------------------------------------ markers
+    def _build_marker_shortcuts(self) -> None:
+        """Chorded ``M`` + number-row shortcuts that drop session markers.
+
+        ``M 1`` … ``M 9`` inject a marker labelled ``marker-1`` … ``marker-9``
+        (labels are adjustable later; the timestamp is what matters for
+        analysis). Only active while a recording is open; timestamps come from
+        the same host-monotonic clock the streams use, so markers line up
+        with the recorded ``t_ns`` axis.
+        """
+
+        self._marker_shortcuts: list[QtGui.QShortcut] = []
+        for digit in range(1, 10):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(f"M, {digit}"), self)
+            shortcut.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(
+                lambda checked=False, index=digit: self._inject_marker(f"marker-{index}")
+            )
+            self._marker_shortcuts.append(shortcut)
+
+    def _inject_marker(self, label: str, note: str = "") -> bool:
+        """Write one marker into the open recording. ``True`` if recorded.
+
+        Without an active recorder the shortcut is a no-op and the status bar
+        explains why; with one, the marker rides the next manifest rewrite.
+        """
+
+        recorder = self._recorder
+        if recorder is None:
+            self.statusBar().showMessage("start a recording to drop markers", 4000)
+            return False
+        try:
+            marker = Marker(label=label, t_ns=time.monotonic_ns(), note=note)
+            recorder.add_marker(marker)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.exception("could not inject marker")
+            self.statusBar().showMessage(f"marker failed: {exc}", 4000)
+            return False
+        self.statusBar().showMessage(f"marker '{label}' recorded", 4000)
+        return True
 
     # ------------------------------------------------------------------ building
     def _build_toolbar(self) -> None:

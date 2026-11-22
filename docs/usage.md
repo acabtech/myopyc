@@ -78,8 +78,14 @@ streams use) or `t_ns` (an absolute host-monotonic timestamp). `note` is
 optional. Markers land in the manifest's top-level `markers` array; see
 [Markers](data-format.md#markers) for the on-disk schema and
 [Reading data in Python](#reading-data-in-python) for access via
-`reader.markers`. GUI marker injection (keyboard shortcuts and plot overlay)
-is planned for a later milestone.
+`reader.markers`.
+
+In the GUI, press `M` followed by a number-row digit (`M 1` … `M 9`) to drop a
+marker labelled `marker-1` … `marker-9` into the open recording at the current
+timestamp (same host-monotonic clock as the streams, so alignment with recorded
+samples is exact). The shortcuts are only active while a recording runs; the
+status bar confirms each injection. Live-plot overlay of markers is planned for
+a later milestone.
 
 ### Exit codes
 
