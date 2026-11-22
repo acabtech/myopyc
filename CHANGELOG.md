@@ -7,6 +7,13 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- NumPy → lab-software interchange recipe
+  ([`docs/interop-lab-software.md`](docs/interop-lab-software.md)): documents
+  read-only post-hoc import of recorded sessions via
+  [`load_session()`](src/myopyc/recorder/reader.py), including EMG/IMU/EVENT
+  dtype-aware reshaping, `t_ns` host-monotonic time/unit/gap caveats, generic
+  CSV and MAT export recipes, and EEGLAB/LabChart-oriented import sketches;
+  linked from [`README.md`](README.md) and [`docs/usage.md`](docs/usage.md).
 - RAM budget overflow warning in the GUI status bar: when dropped samples
   increase across consecutive health ticks during recording, the status line is
   prefixed with a prominent `RAM overflow dropping samples` warning; the warning

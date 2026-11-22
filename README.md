@@ -96,7 +96,9 @@ arrays with host monotonic timestamps (`t_ns`), a per-stream sequence counter
 and eight raw channels; IMU chunks add a quaternion plus accelerometer and
 gyroscope. The full on-disk format — chunk dtypes, `t_ns` semantics, gap
 encoding and the append-only evolution contract — is specified in
-[docs/data-format.md](docs/data-format.md). Read the data with:
+[docs/data-format.md](docs/data-format.md). For importing sessions into
+lab tools (CSV/MAT/EEGLAB/LabChart) see
+[docs/interop-lab-software.md](docs/interop-lab-software.md). Read the data with:
 
 ```python
 from myopyc.recorder import load_session

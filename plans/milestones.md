@@ -140,7 +140,7 @@ No trimming to 0.2.1/0.3.
 
 - [x] `myopyc export <session> --format csv|npz` for one-off analysis (CLI subcommand; default output `<session>-export`; CSV one file per device/stream, NPZ one compressed archive with `<device>/<stream>` keys)
 - [x] CSV export with human-readable ISO timestamps alongside `t_ns` (`t_iso` column rendered from the host monotonic clock — relative time, not wall-clock)
-- [ ] Document a NumPy → lab software (e.g. EEGLAB/LabChart) interchange recipe in `docs/`
+- [x] Document a NumPy → lab software (e.g. EEGLAB/LabChart) interchange recipe in `docs/` (done 2026-11-22: `docs/interop-lab-software.md` covers `load_session`/dtype-aware reshaping, `t_ns`/units/gap caveats, CSV/MAT recipes, and EEGLAB/LabChart-oriented import sketches; linked from `README.md` and `docs/usage.md`)
 
 ### Signal quality & calibration
 

@@ -218,7 +218,9 @@ report = reader.repair()  # report.changed tells you if anything moved
 For one-off analysis outside Python, export a recorded session to CSV (one file
 per device/stream, with a human-readable ISO timestamp column `t_iso` next to
 the raw `t_ns` nanoseconds) or to a compressed NPZ archive (one array per
-`<device>/<stream>` key, exact dtypes preserved):
+`<device>/<stream>` key, exact dtypes preserved). For downstream lab-software
+interchange (NumPy reshaping, MAT/EEGLAB/LabChart recipes, gap/unit caveats),
+see [interop-lab-software.md](interop-lab-software.md).
 
 ```bash
 # CSV into a directory (default output: <session>-export)
