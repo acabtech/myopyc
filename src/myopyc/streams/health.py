@@ -228,20 +228,26 @@ def format_device_line(device: DeviceHealth) -> str:
     return f"{device.label}{tag}: {streams}{battery}"
 
 
-def format_status_line(devices: Sequence[DeviceHealth], *, dropped: int) -> str:
+def format_status_line(
+    devices: Sequence[DeviceHealth], *, dropped: int, overflow_warning: bool = False
+) -> str:
     """Build the full status-bar line from per-device health snapshots.
 
     ``dropped`` is the cumulative dropped-sample count (from the recorder when
-    active, else the running total the GUI tracks). Returns a friendly hint when
-    no armband is streaming yet.
+    active, else the running total the GUI tracks). ``overflow_warning`` marks a
+    sustained RAM-buffer overflow (samples are being dropped to stay within the
+    recording budget). Returns a friendly hint when no armband is streaming yet.
     """
 
     if not devices:
         return "add a simulated arm or connect a Myo"
     parts = [format_device_line(d) for d in devices]
     line = " | ".join(parts)
-    # Surface stalled streams and dropped links prominently so a dead or
-    # flaky BLE connection is not missed.
-    if any(d.warns for d in devices):
+    # Surface stalled streams, dropped links, and sustained buffer overflow
+    # prominently so data loss or a flaky BLE connection is not missed.
+    warns = any(d.warns for d in devices) or overflow_warning
+    if overflow_warning:
+        line = f"RAM overflow dropping samples | {line}"
+    if warns:
         line = f"⚠ {line}"
     return f"{line} | dropped {dropped}"

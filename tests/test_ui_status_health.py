@@ -389,3 +389,83 @@ def test_derived_toggle_clears_curves_when_hidden(qapp: QtWidgets.QApplication) 
         assert rect_y is None or len(rect_y) == 0
     finally:
         _close(window)
+
+
+# ------------------------------------------------------------------ overflow warning
+class _FakeRecorder:
+    def __init__(self, dropped: int = 0) -> None:
+        self._dropped = dropped
+
+    def stats(self) -> dict[str, int]:
+        return {
+            "dropped_samples": self._dropped,
+            "received_samples": 0,
+            "buffered_bytes": 0,
+            "chunks_written": 0,
+            "gaps": 0,
+        }
+
+
+def test_sustained_overflow_warning_appears_and_clears(
+    qapp: QtWidgets.QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Status bar warns only on sustained drop growth, then clears when stable."""
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        info = window.manager.add_simulated("Left")
+        window._mount_view(info)
+        key = info.key
+        fake = _FakeRecorder(dropped=0)
+        window._recorder = fake  # type: ignore[assignment]
+
+        clock = iter([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+        monkeypatch.setattr("myopyc.ui.main_window.time.monotonic", lambda: next(clock))
+
+        # Prime baseline.
+        window.manager._emit(_emg(key, 200))
+        window.manager._emit(_imu(key, 50))
+        line = window.refresh_health()
+        assert "RAM overflow dropping samples" not in line
+
+        # First increase: not yet sustained.
+        fake._dropped = 10
+        window.manager._emit(_emg(key, 200))
+        window.manager._emit(_imu(key, 50))
+        line = window.refresh_health()
+        assert "RAM overflow dropping samples" not in line
+        assert "dropped 10" in line
+
+        # Second consecutive increase: sustained warning.
+        fake._dropped = 20
+        window.manager._emit(_emg(key, 200))
+        window.manager._emit(_imu(key, 50))
+        line = window.refresh_health()
+        assert line.startswith("⚠ RAM overflow dropping samples")
+        assert "dropped 20" in line
+
+        # Stable drops: warning remains until stable window elapses.
+        for dropped in (20, 20, 20):
+            fake._dropped = dropped
+            window.manager._emit(_emg(key, 200))
+            window.manager._emit(_imu(key, 50))
+            line = window.refresh_health()
+        assert "RAM overflow dropping samples" not in line
+        assert "dropped 20" in line
+    finally:
+        window._recorder = None
+        _close(window)
+
+
+def test_no_overflow_warning_when_not_recording(qapp: QtWidgets.QApplication) -> None:
+    """Without an active recorder, drop counter is reported but no overflow warning."""
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        info = window.manager.add_simulated("Left")
+        window._mount_view(info)
+        line = window.refresh_health()
+        assert "RAM overflow dropping samples" not in line
+        assert "dropped 0" in line
+    finally:
+        _close(window)

@@ -152,7 +152,7 @@ No trimming to 0.2.1/0.3.
 
 - [ ] Auto-reconnect policy for dropped BLE links with user-visible state
 - [ ] Session resume: interrupted session detected on next launch, offers to continue into a NEW chunk series (distinct from v0.1's repair, which only reconciles existing chunks, never appends)
-- [ ] RAM budget warning in UI when sustained overflow/drops occur
+- [x] RAM budget warning in UI when sustained overflow/drops occur (done 2026-11-22: status-bar warns on sustained dropped-sample growth during recording and clears after stable ticks; offscreen Qt tests cover appear/clear/no-recording cases)
 
 ### Docs & release
 

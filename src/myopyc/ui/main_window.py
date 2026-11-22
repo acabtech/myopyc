@@ -71,6 +71,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_label: QtWidgets.QLabel | None = None
         self._playback_bar: PlaybackBar | None = None
         self._playback: PlaybackController | None = None
+        # Sustained RAM-overflow detection: warn only after repeated drop growth.
+        self._drop_prev: int | None = None
+        self._drop_increase_streak: int = 0
+        self._drop_stable_streak: int = 0
+        self._overflow_sustained: bool = False
 
         self.setWindowTitle("myopyc - Myo EMG/IMU capture")
         self.resize(1440, 900)
@@ -589,6 +594,44 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._stop_recording()
 
+    def _reset_overflow_warning(self) -> None:
+        self._drop_prev = None
+        self._drop_increase_streak = 0
+        self._drop_stable_streak = 0
+        self._overflow_sustained = False
+
+    def _update_overflow_warning(self, dropped: int) -> bool:
+        """Track sustained RAM-buffer overflow across health ticks.
+
+        A warning is raised only after repeated drop growth (not a single blip)
+        and cleared after drops stay stable for a short window.
+        """
+
+        increase_needed = 2
+        clear_after_stable = 3
+        if self._drop_prev is None:
+            self._drop_prev = dropped
+            return self._overflow_sustained
+
+        if dropped > self._drop_prev:
+            self._drop_increase_streak += 1
+            self._drop_stable_streak = 0
+            if self._drop_increase_streak >= increase_needed:
+                self._overflow_sustained = True
+        elif dropped == self._drop_prev:
+            self._drop_stable_streak += 1
+            self._drop_increase_streak = 0
+            if self._overflow_sustained and self._drop_stable_streak >= clear_after_stable:
+                self._overflow_sustained = False
+        else:
+            # Counter reset (new recording/session); treat as fresh baseline.
+            self._drop_increase_streak = 0
+            self._drop_stable_streak = 0
+            self._overflow_sustained = False
+
+        self._drop_prev = dropped
+        return self._overflow_sustained
+
     def _start_recording(self) -> None:
         if self._recorder is not None:
             return
@@ -613,6 +656,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self._recorder = recorder
+        self._reset_overflow_warning()
         self.record_action.setText("Stop recording")
         self._refresh_live_markers()
         self.setWindowTitle(f"myopyc - recording {recorder.session_dir.name}")
@@ -620,6 +664,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _stop_recording(self) -> None:
         recorder = self._recorder
         self._recorder = None
+        self._reset_overflow_warning()
         self.record_action.setText("Record")
         self.setWindowTitle("myopyc - Myo EMG/IMU capture")
         self._refresh_live_markers()
@@ -694,7 +739,10 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
         dropped = self._recorder.stats()["dropped_samples"] if self._recorder is not None else 0
-        line = format_status_line(devices, dropped=dropped)
+        overflow_warning = self._update_overflow_warning(dropped) if self._recorder is not None else False
+        if self._recorder is None:
+            self._reset_overflow_warning()
+        line = format_status_line(devices, dropped=dropped, overflow_warning=overflow_warning)
         if self._status_label is not None:
             self._status_label.setText(line)
         return line

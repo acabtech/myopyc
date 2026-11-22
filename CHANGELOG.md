@@ -7,6 +7,11 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- RAM budget overflow warning in the GUI status bar: when dropped samples
+  increase across consecutive health ticks during recording, the status line is
+  prefixed with a prominent `RAM overflow dropping samples` warning; the warning
+  clears after drops remain stable, making sustained buffer exhaustion visible
+  without opening the manifest.
 - Per-session `notes` field (manifest-canonical, append-only optional top-level
   field; `FORMAT_VERSION` stays 1). The Sessions dock gains a **Notes…** action
   that edits the note via an atomic manifest rewrite, the note is exposed on

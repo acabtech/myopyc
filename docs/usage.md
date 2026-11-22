@@ -87,7 +87,10 @@ manifest.
 
 If the RAM budget is exhausted, the oldest samples are dropped and a gap entry
 is written to `manifest.json`. This keeps the BLE stream alive and makes loss
-visible instead of silently corrupting the timeline.
+visible instead of silently corrupting the timeline. When drops increase
+sustainedly during recording, the status bar surfaces a prominent
+`RAM overflow dropping samples` warning so the loss is visible without opening
+the manifest.
 
 ## Headless recording
 
