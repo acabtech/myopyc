@@ -7,6 +7,23 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Read-only session playback (session-management milestone): opening a
+  session from the Sessions dock (Open button or double-click) loads the
+  recorded EMG/IMU chunks through the same per-device plot widgets used for
+  live capture, driven from the recorded host-monotonic `t_ns` timeline. A
+  playback bar above the device grid offers a scrub slider (the plots show the
+  6 s window ending at the playhead), Play/Pause at 2x real time (Play after
+  the end replays from the top) and Stop, which re-mounts the live armband
+  views — simulated/BLE devices keep streaming throughout. Playback is
+  strictly read-only: chunk files are only read, the session directory is
+  never written, and the live buffers are untouched (playback uses its own
+  private ring buffer). Mutual exclusions are handled with status-bar hints:
+  recording cannot start while playback is open (starting one closes playback
+  first), playback refuses while a recording runs, and new armbands wait until
+  playback is closed. Covered by offscreen Qt tests (controller load/seek/
+  transport, bar states, dock→playback routing, recording/playback mutual
+  exclusion, byte-identical session directory after playback, post-playback
+  manifest round trip); documented in `docs/usage.md`.
 - ZIP export with manifest integrity check (session-management milestone):
   `myopyc export <session> --format zip` archives the whole session directory
   (`manifest.json` plus every chunk file) together with a generated

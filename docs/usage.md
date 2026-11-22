@@ -38,9 +38,11 @@ The right-side **Sessions** dock lists every recorded session in the current
 output directory (newest first) with sample counts, chunk counts and status.
 Selecting a session enables the action buttons:
 
-- **Open** (or double-click the entry) — shows the session summary: devices,
-  samples, dropped samples, chunks, gaps and marker count. Playback through
-  the plots is planned for a later release.
+- **Open** (or double-click the entry) — loads the session into read-only
+  **playback**: the device panels re-render from the recorded `.npy` chunks
+  through the same EMG/IMU plot widgets, with a playback bar (scrub slider,
+  Play/Pause, Stop) above them. Nothing is written to the session directory —
+  playback is exactly as read-only as `myopyc inspect`. See below.
 - **Rename…** — renames the session directory. Manifest chunk paths are
   relative, so renaming is safe; the recording currently in progress cannot
   be renamed.
@@ -49,6 +51,25 @@ Selecting a session enables the action buttons:
 
 The list refreshes automatically when a recording is finalised; use
 **Refresh** after recording sessions from outside the app.
+
+## Playback
+
+Opening a session from the dock mounts read-only views of every recorded
+device, driven from the recorded host-monotonic `t_ns` timeline:
+
+- **Scrub** by dragging the slider; the EMG/IMU plots show the 6 s window
+  ending at the playhead (a live view is only ever the window ending *now*).
+- **Play/Pause** runs the playhead at 2x real time so long sessions review
+  quickly; pressing Play after the end replays from the top.
+- **Stop** closes playback and re-mounts the live armband views (any simulated
+  or BLE devices keep streaming throughout).
+
+Playback shares the central panel with live capture, so a few rules keep the
+two from fighting: recording must not be active when you open a session (the
+status bar refuses with a hint), starting a recording closes playback first,
+and adding armbands while a session is loaded waits until playback is closed.
+Gesture events from the recorded session are summarised in the manifest
+(`myopyc inspect`); playback renders the continuous EMG/IMU traces.
 
 ## Recording
 

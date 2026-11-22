@@ -22,6 +22,7 @@ from myopyc.recorder.writer import SessionRecorder
 from myopyc.streams.health import DeviceHealth, RateTracker, format_status_line
 from myopyc.streams.live import LiveBuffer
 from myopyc.streams.schema import EVENT_TYPE_NAMES, StreamKind
+from myopyc.ui.playback import SLIDER_STEPS, PlaybackBar, PlaybackController
 from myopyc.ui.plots import DeviceView
 from myopyc.ui.sessions_dock import SessionsDock
 
@@ -68,6 +69,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._health = RateTracker()
         self._last_health_mono: float | None = None
         self._status_label: QtWidgets.QLabel | None = None
+        self._playback_bar: PlaybackBar | None = None
+        self._playback: PlaybackController | None = None
 
         self.setWindowTitle("myopyc - Myo EMG/IMU capture")
         self.resize(1440, 900)
@@ -75,6 +78,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_central()
         self._build_marker_shortcuts()
         self._build_sessions_dock()
+        self._build_playback()
 
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(40)
@@ -204,9 +208,22 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_central(self) -> None:
         central = QtWidgets.QWidget()
-        self._grid = QtWidgets.QGridLayout(central)
+        central_layout = QtWidgets.QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+
+        # Playback control strip: hidden until a session is opened for
+        # playback; sits above the device grid.
+        self._playback_bar = PlaybackBar(central)
+        self._playback_bar.setVisible(False)
+        central_layout.addWidget(self._playback_bar)
+
+        grid_host = QtWidgets.QWidget()
+        self._grid = QtWidgets.QGridLayout(grid_host)
         self._grid.setContentsMargins(8, 8, 8, 8)
         self._grid.setSpacing(8)
+        central_layout.addWidget(grid_host, 1)
+
         self.setCentralWidget(central)
         self.statusBar().showMessage("ready")
         # Permanent health widget on the right; transient messages (errors,
@@ -237,9 +254,110 @@ class MainWindow(QtWidgets.QMainWindow):
             self.sessions_action.setChecked(visible)
 
     def _on_session_opened(self, session_dir: Path) -> None:
-        """Refresh the dock after a session open (e.g. post-recording state)."""
+        """Open the double-clicked/selected session in read-only playback."""
 
-        self._sessions_dock.refresh()
+        self._start_playback(session_dir)
+
+    # ------------------------------------------------------------------ playback
+    def _build_playback(self) -> None:
+        """Wire the playback controller to the central playback bar."""
+
+        assert self._playback_bar is not None
+        self._playback = PlaybackController(
+            self,
+            emg_window_s=self.config.ui.emg_window_s,
+            imu_window_s=self.config.ui.imu_window_s,
+            on_mount_views=self._mount_playback_views,
+            on_close_views=self._close_playback_views,
+            on_progress=self._on_playback_progress,
+        )
+        self._playback.message.connect(self.statusBar().showMessage)
+        self._playback_bar.scrubbed.connect(self._on_playback_scrub)
+        self._playback_bar.play_toggled.connect(self._on_playback_toggle)
+        self._playback_bar.stopped.connect(self._on_playback_stopped)
+
+    def _start_playback(self, session_dir: Path) -> bool:
+        """Load ``session_dir`` into playback; ``True`` when it mounted.
+
+        Refuses while recording is active (the recorder keeps its own state and
+        the views are shared) — the status bar explains why.
+        """
+
+        assert self._playback is not None
+        if self._recorder is not None:
+            self.statusBar().showMessage(
+                "stop the current recording before playing back a session", 4000
+            )
+            return False
+        return self._playback.open_session(session_dir)
+
+    def _mount_playback_views(self, session_name: str) -> None:
+        """Swap the central grid to the read-only playback views."""
+
+        assert self._playback is not None
+        self._views = self._playback.views
+        self._rebuild_grid()
+        assert self._playback_bar is not None
+        self._playback_bar.load_session(session_name, self._playback.duration_s)
+        self._playback_bar.setVisible(True)
+        self.setWindowTitle(f"myopyc - playing {session_name}")
+
+    def _close_playback_views(self) -> None:
+        """Restore the live device views after playback ends."""
+
+        self._views = self._live_views()
+        self._rebuild_grid()
+        assert self._playback_bar is not None
+        self._playback_bar.clear()
+        self._playback_bar.setVisible(False)
+        if self._recorder is None:
+            self.setWindowTitle("myopyc - Myo EMG/IMU capture")
+
+    def _live_views(self) -> dict[str, DeviceView]:
+        """Device views backed by the live buffers (re-created on demand)."""
+
+        views: dict[str, DeviceView] = {}
+        for key in self.manager.keys:
+            info = self.manager.info(key)
+            view = DeviceView(
+                info,
+                self.live,
+                emg_window_s=self.config.ui.emg_window_s,
+                imu_window_s=self.config.ui.imu_window_s,
+            )
+            views[key] = view
+        return views
+
+    def _on_playback_progress(self, current_s: float, total_s: float, fraction: float) -> None:
+        """Track the playhead on the playback bar."""
+
+        assert self._playback_bar is not None
+        self._playback_bar.set_position(current_s, total_s)
+        self._playback_bar.set_slider(round(fraction * SLIDER_STEPS))
+
+    def _on_playback_scrub(self, value: int) -> None:
+        assert self._playback is not None
+        self._playback.seek_fraction(value / SLIDER_STEPS)
+
+    def _on_playback_toggle(self, playing: bool) -> None:
+        """Toggle the controller's transport to match the bar's Play state.
+
+        The controller flips its own internal ``_playing`` flag on each call,
+        so the bar's checked state and the controller's playing state are
+        kept consistent by driving from a single source (the bar).
+        """
+
+        assert self._playback is not None
+        if playing != self._playback.playing:
+            self._playback.play_pause()
+
+    def _on_playback_stopped(self) -> None:
+        assert self._playback is not None
+        self._playback.stop()
+
+    def _close_playback(self) -> None:
+        if self._playback is not None and self._playback.active:
+            self._playback.close_session()
 
     def refresh_sessions(self) -> None:
         """Public hook: rebuild the sessions list (called after recordings end)."""
@@ -351,6 +469,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.manager.start(info.key)
 
     def _mount_view(self, info: DeviceInfo) -> None:
+        if self._playback is not None and self._playback.active:
+            # While playback is open the live view would be discarded anyway;
+            # the status bar explains that new devices wait for it to close.
+            self.statusBar().showMessage("close playback before adding armbands", 4000)
+            return
         view = DeviceView(
             info,
             self.live,
@@ -425,6 +548,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _start_recording(self) -> None:
         if self._recorder is not None:
             return
+        # Playback shares the central device views; recording needs them live.
+        self._close_playback()
         if not self.manager.keys:
             self.record_action.setChecked(False)
             self.statusBar().showMessage("no armbands to record", 4000)
@@ -470,7 +595,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------ tick
     def _tick(self) -> None:
+        playing = self._playback is not None and self._playback.active
         for key, view in self._views.items():
+            if playing:
+                # Playback views render their own status; the manager has no
+                # state for session device keys and would overwrite it with
+                # a misleading "idle".
+                view.refresh()
+                continue
             view.update_display(
                 self.manager.state(key), self.manager.detail(key), self.manager.battery(key)
             )
@@ -532,6 +664,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         if self._recorder is not None:
             self.record_action.setChecked(False)
+        self._close_playback()
         self.manager.stop_all()
         super().closeEvent(event)
 

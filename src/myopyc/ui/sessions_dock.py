@@ -4,9 +4,9 @@ Wraps :func:`myopyc.recorder.reader.find_sessions` for the listing and derives
 lightweight per-session summaries directly from ``manifest.json`` (no ``.npy``
 loading), so refreshing a directory of large sessions stays cheap.
 
-Playback of a session through the plot widgets is a separate milestone; here
-"open" surfaces the session summary (devices, samples, drops, gaps, markers)
-in a details dialog.
+"Open" (button or double-click) emits :attr:`session_opened`; the main window
+starts read-only playback of that session through the plot widgets. A session
+with an unreadable manifest cannot be opened (a message is emitted instead).
 
 Tests operate the dock programmatically (``refresh`` / ``open_session`` /
 ``rename_session`` / ``delete_session`` with dialogs suppressed) so no Qt
@@ -63,20 +63,6 @@ def _describe(summary: dict[str, Any]) -> str:
     name = summary["session_dir"].name
     status = summary.get("status") or "?"
     return f"{name}  ·  {summary['samples']} samples  ·  {summary['chunks']} chunks  ·  {status}"
-
-
-def _describe_detail(summary: dict[str, Any]) -> str:
-    """Multi-line detail text shown by the open-session dialog."""
-
-    lines = [
-        f"session: {summary.get('session_id') or summary['session_dir'].name}",
-        f"created: {summary.get('created_utc') or '?'}",
-        f"status: {summary.get('status') or '?'}",
-        f"devices: {', '.join(summary['devices']) or '-'}",
-        f"samples: {summary['samples']} ({summary['dropped']} dropped)",
-        f"chunks: {summary['chunks']} · gaps: {summary['gaps']} · markers: {summary['markers']}",
-    ]
-    return "\n".join(lines)
 
 
 class SessionsDock(QtWidgets.QDockWidget):
@@ -169,10 +155,11 @@ class SessionsDock(QtWidgets.QDockWidget):
         return self.open_session(session)
 
     def open_session(self, session_dir: Path | str) -> dict[str, Any] | None:
-        """Show the summary details of one session and emit :attr:`session_opened`.
+        """Open one session for playback by emitting :attr:`session_opened`.
 
-        Returns the summary dict, or ``None`` when the manifest is unreadable
-        (an error message is emitted in that case).
+        Returns the manifest-derived summary dict, or ``None`` when the
+        manifest is unreadable (an error message is emitted in that case, so
+        the main window never receives a broken path).
         """
 
         directory = Path(session_dir)
@@ -182,11 +169,6 @@ class SessionsDock(QtWidgets.QDockWidget):
             self.message.emit(f"could not open {directory.name}: {exc}")
             return None
         self.session_opened.emit(directory)
-        parent = self.parent()
-        if isinstance(parent, QtWidgets.QWidget):
-            QtWidgets.QMessageBox.information(
-                parent, f"Session {directory.name}", _describe_detail(summary)
-            )
         return summary
 
     # ------------------------------------------------------------------ rename

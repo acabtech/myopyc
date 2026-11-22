@@ -105,7 +105,15 @@ def test_dock_lists_sessions_newest_first(qapp, tmp_path) -> None:
         _close(window)
 
 
-def test_open_session_shows_details_and_signals(qapp, tmp_path, monkeypatch) -> None:
+def test_open_session_signals_for_playback(qapp, tmp_path, monkeypatch) -> None:
+    """Open emits ``session_opened`` (the main window starts playback).
+
+    The dock itself never loads ``.npy`` chunks; it validates the manifest and
+    hands the path over. Note the manifest-only fixture has no chunk files, so
+    the window's playback controller refuses to mount it — asserting that the
+    *dock* contract (signal + summary) holds regardless.
+    """
+
     directory = _fake_session(tmp_path, "20261122_090000_alpha", samples=42, markers=2)
     opened: list = []
     window = MainWindow(_config(), simulate=0, output_dir=tmp_path)
@@ -113,20 +121,15 @@ def test_open_session_shows_details_and_signals(qapp, tmp_path, monkeypatch) -> 
         dock = _dock(window)
         dock.session_opened.connect(opened.append)
 
-        # Suppress the details dialog; capture the text it would show.
-        shown: list[str] = []
-
-        def fake_information(parent, title, text) -> int:
-            shown.append(str(text))
-            return 0
-
-        monkeypatch.setattr(QtWidgets.QMessageBox, "information", staticmethod(fake_information))
+        messages: list[str] = []
+        dock.message.connect(messages.append)
         summary = dock.open_session(directory)
         assert summary is not None
         assert summary["samples"] == 42
         assert summary["markers"] == 2
         assert opened == [directory]
-        assert "samples: 42" in shown[0]
+        # No summary dialog is shown any more; open routes into playback.
+        assert not any("samples: 42" in m for m in messages)
 
         # Double-click open path on a selected item.
         dock._list.setCurrentRow(0)
