@@ -7,6 +7,20 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Session markers (first slice of the v0.2 event markers & annotations
+  milestone): a timestamped, session-scoped annotation model (`label`,
+  host-monotonic `t_ns`, optional free-text `note`) persisted as a new
+  optional top-level `markers` array in the manifest — purely additive under
+  the append-only rule, so `FORMAT_VERSION` stays 1 and readers that predate
+  markers ignore the key. Headless injection via
+  `myopyc record --marker-file <jsonl>` (`label` plus exactly one of
+  `offset_s` (seconds after recording start) or absolute `t_ns`, optional
+  `note`; blank lines/`#` comments skipped, per-line validation with line
+  numbers). Typed access via `SessionReader.markers` / `SessionData.markers`,
+  and the `markers` array is included in `myopyc inspect` summaries (human and
+  `--json`). Covered by round-trip writer → manifest → reader tests,
+  manifest tolerance tests for malformed entries, JSONL parser tests and CLI
+  tests. GUI marker overlay/keyboard injection is deferred to a follow-up.
 - GUI gesture annotations: a fired pose (fist, waves, double click, from either
   the simulated or the real armband) flashes a bold amber `gesture: <name>`
   label on the device panel header for 2 s, then dims to grey as the

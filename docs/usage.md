@@ -58,6 +58,29 @@ myopyc record --max-seconds 60 --simulate 0 \
 seconds (default: `10`). The command prints periodic counters and a JSON
 summary, then exits.
 
+### Markers
+
+Pass a JSONL marker file to inject pre-planned annotations into the session
+manifest (one JSON object per line; blank lines and `#` comments are skipped):
+
+```bash
+# markers.jsonl
+{"label": "task start", "offset_s": 0, "note": "participant 7"}
+{"label": "flex cue", "offset_s": 30.5}
+{"label": "hardware sync", "t_ns": 9876543210}
+
+myopyc record --max-seconds 60 --simulate 1 --marker-file markers.jsonl
+```
+
+Each marker requires a non-empty `label` and exactly one of `offset_s`
+(seconds after recording start, resolved on the same host-monotonic clock the
+streams use) or `t_ns` (an absolute host-monotonic timestamp). `note` is
+optional. Markers land in the manifest's top-level `markers` array; see
+[Markers](data-format.md#markers) for the on-disk schema and
+[Reading data in Python](#reading-data-in-python) for access via
+`reader.markers`. GUI marker injection (keyboard shortcuts and plot overlay)
+is planned for a later milestone.
+
 ### Exit codes
 
 - `0` — recording completed and the session was finalised successfully.
@@ -155,17 +178,22 @@ reader = SessionReader("path/to/session")
 emg = reader.load_stream("left", "emg")
 t_seconds = (emg["t_ns"] - emg["t_ns"][0]) / 1e9
 channels = np.stack([emg[f"ch{i}"] for i in range(1, 9)], axis=1)
+
+# Markers (empty list for sessions recorded without any)
+for marker in reader.markers:
+    print(marker.label, marker.t_ns / 1e9, marker.note)
 ```
 
 Timestamps are host monotonic nanoseconds taken at BLE receipt. They are
 suitable for ordering and per-device timing, and for best-effort alignment
 between two armbands; they are not a hardware-synchronised clock. The manifest
-lists every chunk and gap so a reader can reconstruct the timeline exactly.
+lists every chunk, gap and marker so a reader can reconstruct the timeline
+exactly.
 
 ## Data format
 
 The complete on-disk specification — chunk dtypes, `t_ns` semantics, gap
-encoding and the append-only evolution contract — lives in
+encoding, markers and the append-only evolution contract — lives in
 [data-format.md](data-format.md). It is normative for anything that reads or
 writes a session directory.
 

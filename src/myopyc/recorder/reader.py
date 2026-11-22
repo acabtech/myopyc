@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from myopyc.recorder.manifest import read_manifest
+from myopyc.recorder.markers import Marker, markers_from_manifest
 from myopyc.recorder.repair import RepairReport, repair_session
 from myopyc.streams.schema import STREAM_DTYPES, StreamKind
 
@@ -50,6 +51,12 @@ class SessionData:
     def gaps(self) -> list[dict[str, Any]]:
         return list(self.manifest.get("gaps", []))
 
+    @property
+    def markers(self) -> list[Marker]:
+        """Typed markers from the manifest (empty for pre-marker sessions)."""
+
+        return markers_from_manifest(self.manifest)
+
 
 class SessionReader:
     """Lazy access to a recorded session directory."""
@@ -57,6 +64,12 @@ class SessionReader:
     def __init__(self, session_dir: Path | str) -> None:
         self.directory = Path(session_dir)
         self.manifest = read_manifest(self.directory)
+
+    @property
+    def markers(self) -> list[Marker]:
+        """Typed markers from the manifest (empty for pre-marker sessions)."""
+
+        return markers_from_manifest(self.manifest)
 
     @property
     def device_keys(self) -> list[str]:
@@ -124,6 +137,7 @@ class SessionReader:
             "created_utc": self.manifest.get("created_utc"),
             "status": self.manifest.get("status"),
             "gaps": len(self.manifest.get("gaps", [])),
+            "markers": [m.as_dict() for m in self.markers],
             "streams": rows,
         }
 

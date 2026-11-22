@@ -21,6 +21,7 @@ import numpy as np
 
 from myopyc.devices.model import SampleBatch
 from myopyc.recorder.manifest import MANIFEST_NAME, isoformat, new_manifest, utc_now, write_manifest
+from myopyc.recorder.markers import Marker
 from myopyc.streams.schema import STREAM_DTYPES, StreamKind
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class SessionRecorder:
         flush_interval_s: float = 2.0,
         max_ram_bytes: int = 64 * 1024 * 1024,
         session_name: str | None = None,
+        markers: list[Marker] | None = None,
     ) -> None:
         if not devices:
             raise ValueError("at least one device is required")
@@ -96,6 +98,7 @@ class SessionRecorder:
             flush_interval_s=self.flush_interval_s,
             max_ram_bytes=self.max_ram_bytes,
         )
+        self._markers: list[Marker] = list(markers or [])
 
     # ------------------------------------------------------------------ lifecycle
     @property
@@ -186,6 +189,25 @@ class SessionRecorder:
                     }
                 )
 
+    # ------------------------------------------------------------------ markers
+    def add_marker(self, marker: Marker) -> None:
+        """Record one marker (already resolved to an absolute ``t_ns``).
+
+        Thread-safe; safe before, during, or after recording. While recording
+        the marker rides the next atomic manifest rewrite (the next flush or
+        :meth:`stop`); outside a running session it is flushed to
+        ``manifest.json`` immediately, so late annotations survive.
+        """
+
+        with self._lock:
+            self._markers.append(marker)
+            self._manifest["markers"] = [m.as_dict() for m in self._markers]
+        if not self.recording and self._started:
+            # Not running (pre-start or post-stop): flush immediately so late
+            # annotations survive without a subsequent rewrite.
+            with self._write_lock:
+                write_manifest(self.session_dir, self._manifest)
+
     # ------------------------------------------------------------------ internals
     def _run(self) -> None:
         while not self._stop_event.wait(self.flush_interval_s):
@@ -263,6 +285,8 @@ class SessionRecorder:
             entry["samples"] = self._written[(device, kind)]
             entry["dropped_samples"] = self._dropped[(device, kind)]
         self._manifest["gaps"] = self._gaps
+        if self._markers:
+            self._manifest["markers"] = [m.as_dict() for m in self._markers]
 
     # ------------------------------------------------------------------ status
     def stats(self) -> dict[str, Any]:
@@ -290,6 +314,7 @@ def open_recorder(
     flush_interval_s: float = 2.0,
     max_ram_bytes: int = 64 * 1024 * 1024,
     session_name: str | None = None,
+    markers: list[Marker] | None = None,
 ) -> SessionRecorder:
     """Create and start a :class:`SessionRecorder` in one call."""
 
@@ -299,6 +324,7 @@ def open_recorder(
         flush_interval_s=flush_interval_s,
         max_ram_bytes=max_ram_bytes,
         session_name=session_name,
+        markers=markers,
     )
     recorder.start()
     return recorder

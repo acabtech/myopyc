@@ -19,9 +19,13 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from myopyc import __version__
 from myopyc.config import load_config
+
+if TYPE_CHECKING:
+    from myopyc.recorder.markers import Marker, MarkerSpec
 
 
 def _parse_ble(values: list[str] | None) -> list[tuple[str, str]]:
@@ -202,10 +206,48 @@ def _discover_ble_devices(config) -> list[tuple[str, str]]:
     return devices
 
 
+def _load_marker_specs(path: Path | None) -> list[MarkerSpec]:
+    """Load and validate the ``--marker-file`` specs; exit on bad input."""
+
+    if path is None:
+        return []
+    from myopyc.recorder.markers import load_marker_file
+
+    try:
+        specs = load_marker_file(path)
+    except OSError as exc:
+        print(f"cannot read marker file {path}: {exc.strerror or exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    except ValueError as exc:
+        print(f"invalid marker file {path}: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    if not specs:
+        print(f"marker file {path} contains no markers", file=sys.stderr)
+        raise SystemExit(2)
+    return specs
+
+
+def _resolve_marker_specs(specs: list[MarkerSpec], t0_ns: int) -> list[Marker]:
+    """Turn offset-based specs into absolute-timestamp markers (in order)."""
+
+    from myopyc.recorder.markers import Marker
+
+    markers: list[Marker] = []
+    for spec in specs:
+        if spec.offset_s is not None:
+            t_ns = t0_ns + int(spec.offset_s * 1e9)
+        else:
+            t_ns = spec.t_ns if spec.t_ns is not None else t0_ns
+        markers.append(Marker(label=spec.label, t_ns=t_ns, note=spec.note))
+    return markers
+
+
 def _cmd_record(args: argparse.Namespace) -> int:
     from myopyc.devices.manager import DeviceManager
     from myopyc.recorder.reader import SessionReader
     from myopyc.recorder.writer import SessionRecorder
+
+    marker_specs = _load_marker_specs(args.marker_file)
 
     config = load_config()
     output_dir = args.output_dir or config.recorder.output_dir
@@ -243,6 +285,10 @@ def _cmd_record(args: argparse.Namespace) -> int:
 
     manager.subscribe(recorder.add)
     recorder.start()
+    # Recording has started: anchor offset-based markers to the true start on
+    # the same host-monotonic clock the streams use for ``t_ns``.
+    for marker in _resolve_marker_specs(marker_specs, time.monotonic_ns()):
+        recorder.add_marker(marker)
     print(f"recording {args.max_seconds:g}s to {recorder.session_dir}", flush=True)
     manager.start_all()
 
@@ -353,6 +399,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="maximum recording duration in seconds (default: 10)",
     )
     record.add_argument("--session-name", default=None, help="suffix for the session folder")
+    record.add_argument(
+        "--marker-file",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="JSONL file of markers to write into the session manifest "
+        '(one JSON object per line: {"label": str, "offset_s": seconds | '
+        '"t_ns": nanoseconds, "note": str?})',
+    )
     record.set_defaults(func=_cmd_record)
 
     inspect = sub.add_parser("inspect", help="summarise a recorded session")
