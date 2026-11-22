@@ -57,6 +57,13 @@ class SessionData:
 
         return markers_from_manifest(self.manifest)
 
+    @property
+    def notes(self) -> str:
+        """Free-text session note (empty for sessions without one)."""
+
+        value = self.manifest.get("notes", "")
+        return value if isinstance(value, str) else ""
+
 
 class SessionReader:
     """Lazy access to a recorded session directory."""
@@ -70,6 +77,13 @@ class SessionReader:
         """Typed markers from the manifest (empty for pre-marker sessions)."""
 
         return markers_from_manifest(self.manifest)
+
+    @property
+    def notes(self) -> str:
+        """Free-text session note (empty for sessions without one)."""
+
+        value = self.manifest.get("notes", "")
+        return value if isinstance(value, str) else ""
 
     @property
     def device_keys(self) -> list[str]:
@@ -136,6 +150,7 @@ class SessionReader:
             "session_id": self.manifest.get("session_id"),
             "created_utc": self.manifest.get("created_utc"),
             "status": self.manifest.get("status"),
+            "notes": self.notes,
             "gaps": len(self.manifest.get("gaps", [])),
             "markers": [m.as_dict() for m in self.markers],
             "streams": rows,

@@ -69,6 +69,7 @@ def new_manifest(
         "stopped_utc": None,
         "status": "recording",
         "timebase": "host-monotonic-ns",
+        "notes": "",
         "chunking": {
             "mode": "time",
             "flush_interval_s": flush_interval_s,

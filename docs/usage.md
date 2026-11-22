@@ -142,6 +142,16 @@ samples is exact). The shortcuts are only active while a recording runs; the
 status bar confirms each injection. Live-plot overlay of markers is planned for
 a later milestone.
 
+### Session notes
+
+The **Sessions** dock (right side, toolbar **Sessions** toggle) lists recorded
+sessions and can open, rename, delete, or annotate them. Select a session and
+click **Notes…** to edit a free-text note stored in the manifest's top-level
+`notes` field. Notes are written atomically to `manifest.json` as an optional
+append-only field (`FORMAT_VERSION` stays 1; missing notes read back as empty).
+The active recording session is protected from note edits to avoid racing the
+recorder's own manifest writes.
+
 ### Exit codes
 
 - `0` — recording completed and the session was finalised successfully.

@@ -33,6 +33,7 @@ def test_roundtrip_writes_chunks_and_manifest(tmp_path) -> None:
     manifest = read_manifest(session_dir)
     assert manifest["status"] == "stopped"
     assert manifest["format_version"] == 1
+    assert manifest["notes"] == ""
     assert manifest["devices"]["left"]["streams"]["emg"]["samples"] == 12
     assert manifest["devices"]["right"]["streams"]["imu"]["samples"] == 2
     assert len(manifest["devices"]["left"]["streams"]["emg"]["chunks"]) == 1
@@ -43,7 +44,10 @@ def test_roundtrip_writes_chunks_and_manifest(tmp_path) -> None:
     assert emg.size == 12
     assert emg["seq"].tolist() == list(range(12))
     assert data["right"][StreamKind.IMU].samples.size == 2
-    assert reader.summary()["gaps"] == 0
+    assert data.notes == ""
+    summary = reader.summary()
+    assert summary["gaps"] == 0
+    assert summary["notes"] == ""
 
 
 def test_multiple_flushes_create_ordered_chunks(tmp_path) -> None:
@@ -191,6 +195,7 @@ def test_append_only_manifest_fields_ignored(tmp_path) -> None:
 
     summary = reader.summary()
     assert summary["status"] == "stopped"
+    assert summary["notes"] == ""
     kinds = {(row["device"], row["stream"]) for row in summary["streams"]}
     assert ("left", "emg") in kinds and ("right", "imu") in kinds
     # Known kinds are understood; the unknown future stream is skipped.

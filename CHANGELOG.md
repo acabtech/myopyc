@@ -7,6 +7,14 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Per-session `notes` field (manifest-canonical, append-only optional top-level
+  field; `FORMAT_VERSION` stays 1). The Sessions dock gains a **Notes…** action
+  that edits the note via an atomic manifest rewrite, the note is exposed on
+  `SessionReader.summary()` / `SessionData.notes` and in `inspect --json`, and
+  missing notes read back as empty for backward compatibility. Active-recording
+  sessions are protected from dock edits to avoid racing the recorder's manifest
+  writes.
+
 - Derived EMG channel overlays (signal-quality milestone, GUI-only slice):
   a checkable "Derived channels" toolbar action draws per-channel rectified
   traces (dashed grey) and a combined RMS envelope (bold light curve,

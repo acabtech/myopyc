@@ -22,7 +22,7 @@ from typing import Any
 
 from PySide6 import QtCore, QtWidgets
 
-from myopyc.recorder.manifest import read_manifest
+from myopyc.recorder.manifest import read_manifest, write_manifest
 from myopyc.recorder.reader import find_sessions
 
 
@@ -43,11 +43,13 @@ def session_summary(session_dir: Path | str) -> dict[str, Any]:
             samples += int(stream.get("samples", 0))
             dropped += int(stream.get("dropped_samples", 0))
             chunks += len(stream.get("chunks", []))
+    notes = manifest.get("notes", "")
     return {
         "session_dir": directory,
         "session_id": manifest.get("session_id"),
         "created_utc": manifest.get("created_utc"),
         "status": manifest.get("status"),
+        "notes": notes if isinstance(notes, str) else "",
         "devices": devices,
         "samples": samples,
         "dropped": dropped,
@@ -105,6 +107,9 @@ class SessionsDock(QtWidgets.QDockWidget):
         open_btn = QtWidgets.QPushButton("Open", content)
         open_btn.clicked.connect(self.open_selected)
         buttons.addWidget(open_btn)
+        notes_btn = QtWidgets.QPushButton("Notes…", content)
+        notes_btn.clicked.connect(self.edit_notes_selected)
+        buttons.addWidget(notes_btn)
         rename_btn = QtWidgets.QPushButton("Rename…", content)
         rename_btn.clicked.connect(self.rename_selected)
         buttons.addWidget(rename_btn)
@@ -129,7 +134,11 @@ class SessionsDock(QtWidgets.QDockWidget):
         for path in sessions:
             item = QtWidgets.QListWidgetItem(path.name)
             try:
-                item.setText(_describe(session_summary(path)))
+                summary = session_summary(path)
+                item.setText(_describe(summary))
+                notes = str(summary.get("notes", "")).strip()
+                if notes:
+                    item.setToolTip(notes)
             except Exception:
                 # Unreadable manifest (mid-write, corrupt): still listable so
                 # the user can inspect/delete it, but without a summary.
@@ -170,6 +179,56 @@ class SessionsDock(QtWidgets.QDockWidget):
             return None
         self.session_opened.emit(directory)
         return summary
+
+    # ------------------------------------------------------------------ notes
+    def edit_notes_selected(self) -> str | None:
+        session = self.selected_session()
+        if session is None:
+            self.message.emit("no session selected")
+            return None
+        return self.edit_notes(session)
+
+    def edit_notes(self, session_dir: Path | str, text: str | None = None) -> str | None:
+        """Edit a session's manifest ``notes`` field (atomic rewrite).
+
+        With ``text`` the action is non-interactive (used by tests); otherwise a
+        multi-line dialog is shown. Returns the saved notes on success, ``None``
+        on cancel/failure. The active recording is protected to avoid racing the
+        recorder's own manifest writes.
+        """
+
+        directory = Path(session_dir)
+        if directory == self._get_active_session():
+            self.message.emit("cannot edit notes for the session currently being recorded")
+            return None
+        try:
+            manifest = read_manifest(directory)
+        except Exception as exc:
+            self.message.emit(f"could not read {directory.name}: {exc}")
+            return None
+
+        current = manifest.get("notes", "")
+        current = current if isinstance(current, str) else ""
+        if text is None:
+            accepted, value = QtWidgets.QInputDialog.getMultiLineText(
+                self,
+                "Session notes",
+                f"Notes for {directory.name}:",
+                current,
+            )
+            if not accepted:
+                return None
+            text = str(value)
+
+        manifest["notes"] = text
+        try:
+            write_manifest(directory, manifest)
+        except OSError as exc:
+            self.message.emit(f"could not save notes: {exc}")
+            return None
+        self.refresh()
+        self.message.emit(f"saved notes for {directory.name}")
+        return text
 
     # ------------------------------------------------------------------ rename
     def rename_selected(self) -> Path | None:

@@ -56,6 +56,7 @@ Top-level keys (v1):
 | `stopped_utc` | string \| null | Finalisation time; `null` while recording. |
 | `status` | string | `"recording"`, `"stopped"`, or `"repaired"`. |
 | `timebase` | string | Always `"host-monotonic-ns"`; see [Timebase](#timebase-and-t_ns). |
+| `notes` | string | Optional free-text session note (operator/protocol/context). Absent/empty means no note; readers must treat a missing field as `""`. |
 | `chunking` | object | `{ "mode": "time", "flush_interval_s": <float>, "max_ram_bytes": <int> }` — the recorder settings that produced this session. |
 | `devices` | object | Keyed by device key (see below). |
 | `gaps` | array | Every drop event; see [Gaps](#gaps-and-drop-accounting). |

@@ -22,7 +22,7 @@ from PySide6 import QtWidgets
 
 from myopyc.config import AppConfig
 from myopyc.devices.model import SampleBatch
-from myopyc.recorder.manifest import new_manifest, write_manifest
+from myopyc.recorder.manifest import new_manifest, read_manifest, write_manifest
 from myopyc.streams.schema import EMG_DTYPE, StreamKind
 from myopyc.ui.main_window import MainWindow
 
@@ -127,6 +127,7 @@ def test_open_session_signals_for_playback(qapp, tmp_path, monkeypatch) -> None:
         assert summary is not None
         assert summary["samples"] == 42
         assert summary["markers"] == 2
+        assert summary["notes"] == ""
         assert opened == [directory]
         # No summary dialog is shown any more; open routes into playback.
         assert not any("samples: 42" in m for m in messages)
@@ -187,6 +188,44 @@ def test_rename_rejects_bad_names_and_collisions(qapp, tmp_path) -> None:
         assert dock.rename_session(alpha, new_name="20261122_100000_beta") is None  # collision
         assert alpha.exists()
         assert any("invalid session name" in m or "already exists" in m for m in messages)
+    finally:
+        _close(window)
+
+
+def test_edit_notes_persists_to_manifest(qapp, tmp_path) -> None:
+    directory = _fake_session(tmp_path, "20261122_090000_alpha")
+
+    window = MainWindow(_config(), simulate=0, output_dir=tmp_path)
+    try:
+        dock = _dock(window)
+        saved = dock.edit_notes(directory, text="participant 7, relaxed baseline")
+        assert saved == "participant 7, relaxed baseline"
+        assert read_manifest(directory)["notes"] == "participant 7, relaxed baseline"
+        summary = dock.open_session(directory)
+        assert summary is not None
+        assert summary["notes"] == "participant 7, relaxed baseline"
+        # Notes appear as a tooltip so the list stays compact.
+        dock._list.setCurrentRow(0)
+        assert "relaxed baseline" in (dock._list.currentItem().toolTip() or "")
+    finally:
+        _close(window)
+
+
+def test_edit_notes_protected_while_recording(qapp, tmp_path) -> None:
+    window = MainWindow(_config(), simulate=0, output_dir=tmp_path)
+    try:
+        window.manager.add_simulated("Left")
+        window.record_action.setChecked(True)
+        recorder = window._recorder
+        assert recorder is not None
+        messages: list[str] = []
+        _dock(window).message.connect(messages.append)
+
+        assert _dock(window).edit_notes(recorder.session_dir, text="nope") is None
+        assert read_manifest(recorder.session_dir)["notes"] == ""
+        assert any("currently being recorded" in m for m in messages)
+
+        window.record_action.setChecked(False)
     finally:
         _close(window)
 

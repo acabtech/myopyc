@@ -49,6 +49,7 @@ def test_inspect_json_emits_single_object(tmp_path: Path, capsys) -> None:
     payload = json.loads(out)
     assert payload["session_id"] == read_manifest(session_dir)["session_id"]
     assert payload["status"] == "stopped"
+    assert payload["notes"] == ""
     assert "streams" in payload
     # No keys leak in when the flags were not requested.
     assert "repair" not in payload
