@@ -62,6 +62,7 @@ class UIConfig:
     auto_start_streaming: bool = True
     gesture_annotations: bool = True
     derived_channels: bool = False
+    notch_hz: float = 60.0
 
 
 @dataclass
@@ -120,6 +121,7 @@ class AppConfig:
             auto_start_streaming=bool(ui_raw.get("auto_start_streaming", True)),
             gesture_annotations=bool(ui_raw.get("gesture_annotations", True)),
             derived_channels=bool(ui_raw.get("derived_channels", False)),
+            notch_hz=float(ui_raw.get("notch_hz", 60.0)),
         )
         return cls(
             version=int(raw.get("version", CONFIG_VERSION)),

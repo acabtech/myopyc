@@ -33,18 +33,21 @@ Keep a Changelog and the project uses semantic versioning.
   sessions are protected from dock edits to avoid racing the recorder's manifest
   writes.
 
-- Derived EMG channel overlays (signal-quality milestone, GUI-only slice):
+- Derived EMG channel overlays (signal-quality milestone):
   a checkable "Derived channels" toolbar action draws per-channel rectified
   traces (dashed grey) and a combined RMS envelope (bold light curve,
   250 ms moving window over the channel mean) on top of the raw EMG
-  oscilloscope in every `DeviceView` — live and playback alike. The
-  computation happens only while the toggle is on, hides with stale
-  geometry cleared so re-enabling never flashes old data, and never alters
-  recorded raw data (plots consume the live/playback buffers only). The
-  toggle is persisted as `ui.derived_channels` in `config.toml`
-  (default off) and honored when new armbands mount. Covered by offscreen
-  Qt tests (visibility flip on open views, config round trip, envelope math
-  against a constant signal, stale-geometry clearing).
+  oscilloscope in every `DeviceView` — live and playback alike. Derived
+  overlays apply an optional per-channel notch (default 60 Hz, toolbar
+  toggle, persisted as `ui.notch_hz`) before rectified/RMS rendering; set
+  to 0 Hz/off to disable. The computation happens only while the toggle is
+  on, hides with stale geometry cleared so re-enabling never flashes old
+  data, and never alters recorded raw data (plots consume the
+  live/playback buffers only). The toggle is persisted as
+  `ui.derived_channels` in `config.toml` (default off) and honored when
+  new armbands mount. Covered by offscreen Qt tests (visibility flip,
+  config round trip, envelope math, stale-geometry clearing, notch
+  attenuation with raw-signal preservation).
 - **Marker lanes/overlay (event markers milestone, remainder of `114`):** session
   markers render as vertical dashed amber lines labeled on the shared
   host-monotonic `t_ns` axis on both EMG and IMU plots. Live recording views

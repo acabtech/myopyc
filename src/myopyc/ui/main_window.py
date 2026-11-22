@@ -199,13 +199,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gesture_action.toggled.connect(self._toggle_gesture_annotations)
         toolbar.addAction(self.gesture_action)
 
-        # Derived EMG channels (rectified / RMS envelope): GUI-only overlays,
-        # never written into recorded data. Off by default.
+        # Derived EMG channels (rectified / RMS envelope + optional notch):
+        # GUI-only overlays, never written into recorded data. Off by default.
         self.derived_action = QtGui.QAction("Derived channels", self)
         self.derived_action.setCheckable(True)
         self.derived_action.setChecked(self.config.ui.derived_channels)
         self.derived_action.toggled.connect(self._toggle_derived_channels)
         toolbar.addAction(self.derived_action)
+
+        self.notch_action = QtGui.QAction("Notch 60 Hz", self)
+        self.notch_action.setCheckable(True)
+        self.notch_action.setChecked(abs(float(self.config.ui.notch_hz) - 60.0) < 1e-6)
+        self.notch_action.toggled.connect(self._toggle_notch)
+        toolbar.addAction(self.notch_action)
 
         self.add_arm_action = QtGui.QAction("Add simulated arm", self)
         self.add_arm_action.triggered.connect(self._add_simulated)
@@ -574,6 +580,21 @@ class MainWindow(QtWidgets.QMainWindow):
             log.exception("could not persist derived-channel toggle")
         self.statusBar().showMessage(
             f"derived channels {'on' if checked else 'off'}", 4000
+        )
+
+    def _toggle_notch(self, checked: bool) -> None:
+        """Set per-channel notch frequency used by derived EMG overlays."""
+
+        notch_hz = 60.0 if checked else 0.0
+        self.config.ui.notch_hz = notch_hz
+        for view in self._views.values():
+            view.emg.set_notch_hz(notch_hz)
+        try:
+            save_config(self.config)
+        except OSError:
+            log.exception("could not persist notch toggle")
+        self.statusBar().showMessage(
+            f"notch {'60 Hz' if checked else 'off'}", 4000
         )
 
     def _toggle_gesture_annotations(self, checked: bool) -> None:

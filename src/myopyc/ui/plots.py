@@ -26,6 +26,52 @@ RECT_PEN = pg.mkPen("#8a8a8a", width=1, style=QtCore.Qt.PenStyle.DashLine)
 MARKER_PEN = pg.mkPen("#ffd166", width=1, style=QtCore.Qt.PenStyle.DashLine)
 
 
+def _notch_biquad_coeffs(freq_hz: float, sample_rate_hz: float, q: float = 30.0) -> tuple[float, ...]:
+    """Second-order IIR notch (biquad) coefficients, normalized so ``a0 == 1``.
+
+    The filter removes a narrow band around ``freq_hz`` (e.g. mains 50/60 Hz).
+    It is intentionally small/fixed-order for cheap per-refresh evaluation in
+    the live plot path; the result is GUI-only and never written to recordings.
+    """
+
+    w0 = 2.0 * np.pi * float(freq_hz) / float(sample_rate_hz)
+    cos_w0 = float(np.cos(w0))
+    sin_w0 = float(np.sin(w0))
+    alpha = sin_w0 / (2.0 * float(q))
+    b0 = 1.0
+    b1 = -2.0 * cos_w0
+    b2 = 1.0
+    a0 = 1.0 + alpha
+    a1 = -2.0 * cos_w0
+    a2 = 1.0 - alpha
+    return b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0
+
+
+def apply_notch(samples: np.ndarray, freq_hz: float, sample_rate_hz: float = 200.0) -> np.ndarray:
+    """Apply a narrow notch filter to a 1-D signal; returns a float32 copy.
+
+    Invalid/out-of-Nyquist frequencies are a no-op so the derived overlay stays
+    robust to bad config values. Filtering is causal (lfilter form) which is
+    appropriate for scrolling live data.
+    """
+
+    data = np.ascontiguousarray(samples, dtype=np.float32)
+    freq = float(freq_hz)
+    nyquist = float(sample_rate_hz) / 2.0
+    if data.size == 0 or not np.isfinite(freq) or freq <= 0.0 or freq >= nyquist:
+        return data
+    b0, b1, b2, a1, a2 = _notch_biquad_coeffs(freq, sample_rate_hz)
+    # Direct Form I transposed is simple and stable enough for a narrow notch.
+    y = np.empty_like(data)
+    x1 = x2 = y1 = y2 = 0.0
+    for i, x0 in enumerate(data.astype(np.float64, copy=False)):
+        y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        y[i] = y0
+        x2, x1 = x1, x0
+        y2, y1 = y1, y0
+    return np.asarray(y, dtype=np.float32)
+
+
 class EmgPlot(pg.PlotWidget):
     #: RMS envelope window in samples (EMG runs at 200 Hz; 50 samples = 250 ms).
     RMS_WINDOW = 50
@@ -33,6 +79,7 @@ class EmgPlot(pg.PlotWidget):
     def __init__(self, window_s: float, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent=parent)
         self.window_s = window_s
+        self._notch_hz: float | None = None
         self.setLabel("left", "EMG", units="int8")
         self.setLabel("bottom", "time", units="s")
         self.setYRange(-128, 127, padding=0.05)
@@ -60,6 +107,19 @@ class EmgPlot(pg.PlotWidget):
             # Clear stale geometry so a re-enabled view never flashes old data.
             for curve in self._derived_curves:
                 curve.setData([])
+
+    def set_notch_hz(self, freq_hz: float | None) -> None:
+        """Configure per-channel notch for derived overlays (GUI-only).
+
+        ``None`` or a non-positive value disables notching; the rectified/RMS
+        overlays then use the raw signal as before. The next ``update_data``
+        call picks up the new setting.
+        """
+
+        if freq_hz is None or not np.isfinite(freq_hz) or float(freq_hz) <= 0.0:
+            self._notch_hz = None
+        else:
+            self._notch_hz = float(freq_hz)
 
     def set_markers(self, markers: Sequence[Marker]) -> None:
         """Replace marker annotations rendered as vertical lines."""
@@ -113,7 +173,10 @@ class EmgPlot(pg.PlotWidget):
             values = np.ascontiguousarray(samples[f"ch{index + 1}"], dtype=np.float32)
             curve.setData(times, values)
             if derived_visible:
-                rect = np.abs(values)
+                derived_values = (
+                    apply_notch(values, self._notch_hz) if self._notch_hz is not None else values
+                )
+                rect = np.abs(derived_values)
                 self._derived_curves[index].setData(times, rect)
                 rms_stack.append(rect)
         if derived_visible:

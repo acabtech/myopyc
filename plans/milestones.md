@@ -146,7 +146,7 @@ No trimming to 0.2.1/0.3.
 
 - [ ] Raw-signal quality view: per-channel histogram / saturation detection during a calibration routine
 - [ ] Guided calibration workflow (relax / flex sequence with prompts) writing a `calibration` block into the manifest
-- [~] Simple derived channels toggle: rectified, RMS envelope, per-channel notching — GUI-only, never alters recorded raw data (partially done 2026-11-22: checkable "Derived channels" toolbar action draws per-channel rectified traces and a combined RMS envelope on every EMG plot, persisted as `ui.derived_channels`, stale-geometry cleared on hide, offscreen Qt tests; per-channel notching still pending)
+- [x] Simple derived channels toggle: rectified, RMS envelope, per-channel notching — GUI-only, never alters recorded raw data (done 2026-11-22: checkable "Derived channels" toolbar action draws per-channel rectified traces and a combined RMS envelope on every EMG plot; per-channel notch filter (default 60 Hz, toolbar toggle, persisted as `ui.notch_hz`) applied in derived overlay path only; stale-geometry cleared on hide; offscreen Qt tests cover toggle, persistence, envelope, and notch attenuation)
 
 ### Robustness
 

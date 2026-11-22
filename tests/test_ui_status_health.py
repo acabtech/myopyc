@@ -348,6 +348,8 @@ def test_derived_overlays_follow_live_data(qapp: QtWidgets.QApplication) -> None
         window._mount_view(info)
         view = window._views[info.key]
         window.derived_action.setChecked(True)
+        # Isolate this legacy rectified/RMS assertion from notch behavior.
+        window.notch_action.setChecked(False)
 
         batch = _emg(info.key, 100)
         # A constant full-scale signal on every channel: the RMS envelope of a
@@ -365,6 +367,59 @@ def test_derived_overlays_follow_live_data(qapp: QtWidgets.QApplication) -> None
         assert rms_x is not None and len(rms_x) == len(raw_x)
         # Middle of the window: the moving average is fully populated.
         assert np.allclose(rms_y[len(rms_y) // 2], 64.0, atol=1.0)
+    finally:
+        _close(window)
+
+
+def test_notch_toggle_applies_to_derived_overlays(qapp: QtWidgets.QApplication) -> None:
+    """Notching attenuates a 60 Hz component in derived overlays only."""
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        info = window.manager.add_simulated("Left")
+        window._mount_view(info)
+        view = window._views[info.key]
+        window.derived_action.setChecked(True)
+        window.notch_action.setChecked(False)
+
+        batch = _emg(info.key, 400)
+        t = np.arange(batch.data.shape[0], dtype=np.float32) / 200.0
+        sine = (80.0 * np.sin(2.0 * np.pi * 60.0 * t)).astype(np.int8)
+        for ch in (f"ch{i}" for i in range(1, 9)):
+            batch.data[ch] = sine
+        window.manager._emit(batch)
+        view.refresh()
+
+        _x, rect_no_notch = view.emg._derived_curves[0].getData()
+        assert rect_no_notch is not None
+        tail_no_notch = np.asarray(rect_no_notch[-100:], dtype=np.float32)
+
+        window.notch_action.setChecked(True)
+        view.refresh()
+        _x, rect_notch = view.emg._derived_curves[0].getData()
+        assert rect_notch is not None
+        tail_notch = np.asarray(rect_notch[-100:], dtype=np.float32)
+
+        assert float(np.mean(tail_notch)) < float(np.mean(tail_no_notch)) * 0.25
+        # Raw EMG curve remains the original signal; notching is overlay-only.
+        _raw_x, raw_y = view.emg._curves[0].getData()
+        assert np.array_equal(np.asarray(raw_y, dtype=np.int8), sine[-len(raw_y) :])
+    finally:
+        _close(window)
+
+
+def test_notch_toggle_config_persisted(qapp: QtWidgets.QApplication, tmp_path) -> None:
+    """The notch toggle survives a config save/reload round trip."""
+
+    from myopyc.config import load_config, save_config
+
+    window = MainWindow(_config(), simulate=0)
+    try:
+        window.notch_action.setChecked(False)
+        path = tmp_path / "config.toml"
+        save_config(window.config, path)
+        reloaded = load_config(path)
+        assert reloaded.ui.notch_hz == 0.0
     finally:
         _close(window)
 
