@@ -142,8 +142,9 @@ In the GUI, press `M` followed by a number-row digit (`M 1` … `M 9`) to drop a
 marker labelled `marker-1` … `marker-9` into the open recording at the current
 timestamp (same host-monotonic clock as the streams, so alignment with recorded
 samples is exact). The shortcuts are only active while a recording runs; the
-status bar confirms each injection. Live-plot overlay of markers is planned for
-a later milestone.
+status bar confirms each injection. Markers render as vertical dashed labeled
+lines on the EMG/IMU plots during live recording and in read-only playback; see
+the [User guide](user-guide.md#markers) for workflow details.
 
 ### Session notes
 

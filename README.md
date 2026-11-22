@@ -3,6 +3,9 @@
 Dongleless Thalmic Myo capture for Linux: live EMG/IMU visualization, up to two
 armbands at once, and RAM-buffered recordings written to disk in chunks.
 
+Project docs are published on GitHub Pages: https://acabtech.github.io/myopyc/
+(source in [`docs/`](docs/), built with MkDocs).
+
 `myopyc` is a desktop application that wraps the excellent
 [`dl-myo`](https://github.com/iomz/dl-myo) BLE client. It adds the things you
 need for actual data collection:
@@ -75,6 +78,10 @@ myopyc sessions
 ```
 
 ## Recorded data
+
+See the [User guide](docs/user-guide.md) for collection workflows (markers,
+gesture annotations, derived EMG overlays, sessions/playback, notes, and
+export). The command reference is in [docs/usage.md](docs/usage.md).
 
 Each session is a self-contained directory:
 

@@ -20,9 +20,10 @@ emg = session["left"]["emg"].samples   # structured NumPy array, EMG_DTYPE
 imu = session["left"]["imu"].samples   # structured NumPy array, IMU_DTYPE
 ```
 
-`load_session()` returns [`SessionData`](../src/myopyc/recorder/reader.py)
-containing per-device [`DeviceData`](../src/myopyc/recorder/reader.py) and
-per-stream [`StreamData`](../src/myopyc/recorder/reader.py). Each `StreamData`
+`load_session()` returns `SessionData` containing per-device `DeviceData` and
+per-stream `StreamData` (see
+[`reader.py`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/recorder/reader.py)).
+Each `StreamData`
 has:
 
 - `samples`: contiguous structured array for the whole stream (all chunks
@@ -30,7 +31,8 @@ has:
 - `chunks`: the raw per-chunk arrays, if you need chunk boundaries.
 - `meta`: manifest stream metadata (dtype string, `sample_rate_hz`, columns).
 
-Stream dtypes are defined in [`src/myopyc/streams/schema.py`](../src/myopyc/streams/schema.py):
+Stream dtypes are defined in
+[`src/myopyc/streams/schema.py`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/streams/schema.py):
 
 | Stream | Key fields | Notes |
 |---|---|---|
@@ -162,9 +164,9 @@ Caveats for EEGLAB:
 - If there are recorded gaps/drops, do not silently stitch them as continuous
   EEG unless your analysis explicitly allows it. Either analyze contiguous
   segments between gaps, or resample/interpolate and document it.
-- EVENT markers can be exported separately from
-  [`SessionReader.markers`](../src/myopyc/recorder/reader.py) or the manifest
-  `markers` array and imported as EEGLAB events if needed.
+- EVENT markers can be exported separately from `SessionReader.markers`
+  ([`reader.py`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/recorder/reader.py))
+  or the manifest `markers` array and imported as EEGLAB events if needed.
 
 ## LabChart-oriented recipe
 
@@ -191,7 +193,8 @@ event timelines, prefer:
 
 - `session[device]["event"].samples` for recorded pose events (`type`, payload
   quaternion, `t_ns`).
-- `session.markers` / `reader.markers` for user/session annotations.
+- `session.markers` / `reader.markers` for user/session annotations (see
+  [`reader.py`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/recorder/reader.py)).
 
 When importing into tools with event channels, convert events to an event table
 (time + label) rather than forcing them onto a fixed-rate signal grid.

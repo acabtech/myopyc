@@ -7,6 +7,17 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- User-guide workflow documentation and GitHub Pages docs site (v0.2 docs
+  milestone): added [`docs/user-guide.md`](docs/user-guide.md) covering
+  implemented marker injection/overlay, gesture annotations, derived
+  channels/RMS/notch, sessions dock/playback/notes, and CSV/NPZ/ZIP export
+  workflows, with an explicit "not yet implemented" note for calibration
+  histogram/saturation and guided calibration. Added MkDocs config
+  ([`mkdocs.yml`](mkdocs.yml)), docs index ([`docs/index.md`](docs/index.md)),
+  GitHub Pages workflow ([`.github/workflows/docs.yml`](.github/workflows/docs.yml)),
+  and a `docs` extra in [`pyproject.toml`](pyproject.toml). Fixed stale marker
+  overlay wording in [`docs/usage.md`](docs/usage.md) and linked the guide from
+  [`README.md`](README.md).
 - Closed stale v0.2 EVENT dtype milestone item after contract verification: [`EVENT_DTYPE`](src/myopyc/streams/schema.py) already encodes host-monotonic `t_ns`, per-stream `seq`, pose `type`, and packed orientation payload `ox/oy/oz/ow`, with coverage in [`tests/test_schema.py`](tests/test_schema.py) and EVENT round-trip tests in [`tests/test_recorder.py`](tests/test_recorder.py); [`plans/milestones.md`](plans/milestones.md) updated.
 - Data-format spec audit/closure for v0.2 additive fields: [`docs/data-format.md`](docs/data-format.md)
   now explicitly documents optional top-level `notes` and `markers`, the optional

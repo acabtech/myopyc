@@ -1,0 +1,24 @@
+site_name: myopyc
+site_description: Dongleless Thalmic Myo capture and visualization for Linux
+site_url: https://acabtech.github.io/myopyc/
+repo_url: https://github.com/acabtech/myopyc
+repo_name: acabtech/myopyc
+
+theme:
+  name: material
+
+nav:
+  - Home: index.md
+  - Setup (Linux): setup-linux.md
+  - Usage: usage.md
+  - User guide: user-guide.md
+  - Data format: data-format.md
+  - Lab interop: interop-lab-software.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences

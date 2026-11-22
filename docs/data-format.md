@@ -6,8 +6,9 @@ session whose manifest carries `format: "myopyc.session"` and
 `format_version: 1`.
 
 The single source of truth for dtypes is
-[`src/myopyc/streams/schema.py`](../src/myopyc/streams/schema.py); the manifest
-writer lives in [`src/myopyc/recorder/manifest.py`](../src/myopyc/recorder/manifest.py).
+[`src/myopyc/streams/schema.py`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/streams/schema.py);
+the manifest writer lives in
+[`src/myopyc/recorder/manifest.py`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/recorder/manifest.py).
 
 ## Session layout
 
@@ -129,7 +130,7 @@ Expected rate: ~200 Hz per channel.
 
 Expected rate: ~50 Hz.
 
-### EVENT (`devices/<key>/event/chunk-NNNNN.npy`)
+### EVENT (`devices/<key>/event/chunk-NNNNN.npy`) { #event-deviceskeyeventchunk-nnnnnpy }
 
 | Field | Dtype | Unit | Meaning |
 |---|---|---|---|
@@ -254,8 +255,8 @@ Semantics a reader can rely on:
 
 If the process dies mid-flush, the on-disk state can disagree with the
 manifest in three ways, all handled by
-[`repair_session()`](../src/myopyc/recorder/repair.py) (`myopyc inspect
---repair`):
+[`repair_session()`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/recorder/repair.py)
+(`myopyc inspect --repair`):
 
 1. **Orphaned chunk** — `.npy` written but never registered in the manifest
    (process died before the atomic manifest rewrite). Quarantined into
@@ -284,7 +285,8 @@ the contract in practice:
 - **`markers`** (top-level, optional array): session-scoped annotations with
   `label`, `t_ns`, optional `note`/`created_utc`; missing means no markers.
 - **`event` stream kind** (`devices.<k>.streams.event`, optional): event-driven
-  gesture/pose chunks using [`EVENT_DTYPE`](../src/myopyc/streams/schema.py);
+  gesture/pose chunks using
+  [`EVENT_DTYPE`](https://github.com/acabtech/myopyc/blob/main/src/myopyc/streams/schema.py);
   missing means the session has no event stream.
 
 ### Writer rules

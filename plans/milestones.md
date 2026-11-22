@@ -156,7 +156,7 @@ No trimming to 0.2.1/0.3.
 
 ### Docs & release
 
-- [ ] User-guide section for markers/gestures/calibration workflows
+- [x] User-guide section for markers/gestures/calibration workflows (done 2026-11-22: [`docs/user-guide.md`](../docs/user-guide.md) covers implemented marker injection/overlay, gesture annotations, derived EMG/RMS/notch, sessions/playback/notes, and export workflows; explicitly marks calibration histogram/saturation view and guided calibration workflow as not yet implemented; published via MkDocs/GitHub Pages config)
 - [x] Update data-format spec with the append-only evolution contract and the new optional `markers`/event-stream fields (done 2026-11-22: [`docs/data-format.md`](../docs/data-format.md) audited/updated to document v0.2 additive `notes`, `markers`, and `event` stream, explicitly state `FORMAT_VERSION` remains 1, and spell out writer/reader append-only rules with known additive-field examples)
 - [ ] CHANGELOG 0.2.0 entry; tag `v0.2.0` with release notes
 - [ ] PyPI decision revisit: publish `myopyc` to PyPI at v0.2.0 (CI publishing on tag) or extend git-only stance — per Q6, this was deferred from v0.1
