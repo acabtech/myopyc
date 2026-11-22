@@ -127,7 +127,7 @@ No trimming to 0.2.1/0.3.
 - [x] Round-trip tests: write + read EVENT chunks, manifest lists all three streams, reader returns the structured array
 - [x] Recorder emits `event/` chunk directories per device and the manifest lists `event` alongside `emg`/`imu` (append-only; old readers skip it)
 - [x] GUI flash/annotation when a gesture fires; toggleable suppression (done 2026-11-20: `DeviceView.announce_event()` flashes a bold amber `gesture: <name>` label for 2 s then dims; checkable "Gesture annotations" toolbar action persisted as `ui.gesture_annotations` in `config.toml`; offscreen Qt tests cover flash, toggle and config round trip)
-- [ ] Recorded and readable via `SessionReader` like EMG/IMU
+- [x] Recorded and readable via `SessionReader` like EMG/IMU (done 2026-11-22: `SessionReader.load/load_stream/iter_chunks/chunks/summary` and `SessionData`/`DeviceData` indexing cover `StreamKind.EVENT` like EMG/IMU; explicit parity test `tests/test_recorder.py::test_event_stream_readable_via_session_reader_like_emg_imu`)
 
 ### Session management (GUI)
 
