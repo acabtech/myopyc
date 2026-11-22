@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -251,6 +253,60 @@ def test_append_only_manifest_fields_ignored(tmp_path) -> None:
     # A reader path that never asked to mutate the session leaves it intact.
     assert (session_dir / "manifest.json").read_text(encoding="utf-8").endswith("}\n")
     assert read_manifest(session_dir)["markers"][0]["label"] == "start"
+
+
+def test_resume_recorder_continues_chunk_series(tmp_path) -> None:
+    """Resuming an interrupted session appends a NEW continuing chunk series."""
+
+    recorder = _recorder(tmp_path)
+    recorder.add(make_emg("left", count=2, start_seq=0, t0=1_000_000_000))
+    recorder._flush_all()  # chunk-00000.npy
+    recorder.add(make_emg("left", count=3, start_seq=2, t0=1_100_000_000))
+    session_dir = recorder.stop()  # chunk-00001.npy
+
+    # Simulate crash/interruption after stop metadata was written in old format:
+    # status is left as recording, as if process died before finalisation.
+    manifest = read_manifest(session_dir)
+    manifest["status"] = "recording"
+    manifest["stopped_utc"] = None
+    (session_dir / "manifest.json").write_text(
+        __import__("json").dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+
+    resumed = __import__("myopyc.recorder.writer", fromlist=["resume_recorder"]).resume_recorder(
+        session_dir, flush_interval_s=0.05
+    )
+    try:
+        resumed.add(make_emg("left", count=2, start_seq=5, t0=1_200_000_000))
+    finally:
+        resumed.stop()
+
+    manifest = read_manifest(session_dir)
+    assert manifest["status"] == "stopped"
+    assert manifest.get("resume_count") == 1
+    assert "resumed_utc" in manifest
+    chunks = manifest["devices"]["left"]["streams"]["emg"]["chunks"]
+    assert [Path(c["file"]).name for c in chunks] == [
+        "chunk-00000.npy",
+        "chunk-00001.npy",
+        "chunk-00002.npy",
+    ]
+    loaded = SessionReader(session_dir).load_stream("left", StreamKind.EMG)
+    assert loaded["seq"].tolist() == [0, 1, 2, 3, 4, 5, 6]
+    assert loaded.size == 7
+
+
+def test_find_interrupted_sessions(tmp_path) -> None:
+    recorder = _recorder(tmp_path)
+    session_dir = recorder.stop()
+    manifest = read_manifest(session_dir)
+    manifest["status"] = "recording"
+    (session_dir / "manifest.json").write_text(
+        __import__("json").dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    from myopyc.recorder.writer import find_interrupted_sessions
+
+    assert find_interrupted_sessions(tmp_path) == [session_dir]
 
 
 def test_legacy_v01_reader_skips_event_stream(tmp_path) -> None:

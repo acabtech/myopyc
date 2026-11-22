@@ -214,6 +214,38 @@ def test_reader_repair_and_enum_guard(tmp_path: Path) -> None:
     assert {kind.value for kind in StreamKind} == {"emg", "imu", "event"}
 
 
+def test_resume_after_repair_continues_new_chunk_series(tmp_path: Path) -> None:
+    """Repair reconciles interrupted state; resume appends a new chunk series."""
+
+    session_dir = _record_two_flushes(tmp_path)
+    # Add an orphan that mimics a crashed mid-flush write and rewind status.
+    extra = session_dir / EMG_DIR / "chunk-00002.npy"
+    rows = np.zeros(2, dtype=EMG_DTYPE)
+    rows["seq"] = [100, 101]
+    np.save(extra, rows)
+    _set_status(session_dir, "recording")
+
+    from myopyc.recorder.writer import resume_recorder
+
+    resumed = resume_recorder(session_dir, flush_interval_s=0.05)
+    try:
+        resumed.add(make_emg("left", count=2, start_seq=5, t0=1_200_000_000))
+    finally:
+        resumed.stop()
+
+    manifest = read_manifest(session_dir)
+    assert manifest["status"] == "stopped"
+    assert manifest.get("resume_count") == 1
+    chunks = _emg_chunks(manifest)
+    names = [Path(c["file"]).name for c in chunks]
+    assert names[:2] == ["chunk-00000.npy", "chunk-00001.npy"]
+    # Orphan chunk-00002 was quarantined out of the stream dir; resume continues
+    # after the highest existing chunk index still present in the stream.
+    assert names[-1] == "chunk-00002.npy"
+    loaded = SessionReader(session_dir).load_stream("left", "emg")
+    assert loaded["seq"].tolist() == [0, 1, 2, 3, 4, 5, 6]
+
+
 # A real subprocess that is SIGKILLed partway through writing a chunk, so the
 # on-disk file has a valid NumPy header but an incomplete body -- exactly the
 # state a power loss leaves behind. The manifest still lists only the previous

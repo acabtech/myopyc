@@ -18,7 +18,8 @@ from myopyc.devices.manager import DeviceManager
 from myopyc.devices.model import DeviceInfo, SampleBatch
 from myopyc.recorder.markers import Marker, markers_from_manifest
 from myopyc.recorder.reader import SessionReader, find_sessions
-from myopyc.recorder.writer import SessionRecorder
+from myopyc.recorder.repair import repair_session
+from myopyc.recorder.writer import SessionRecorder, find_interrupted_sessions, resume_recorder
 from myopyc.streams.health import DeviceHealth, RateTracker, format_status_line
 from myopyc.streams.live import LiveBuffer
 from myopyc.streams.schema import EVENT_TYPE_NAMES, StreamKind
@@ -116,6 +117,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._discovery_thread.start()
         else:
             self._discovery_thread = None
+
+        # Deferred so the main window is visible before a modal prompt appears.
+        QtCore.QTimer.singleShot(0, self._prompt_interrupted_sessions)
 
     # ------------------------------------------------------------------ markers
     def _build_marker_shortcuts(self) -> None:
@@ -607,6 +611,92 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("gesture annotations off", 4000)
         else:
             self.statusBar().showMessage("gesture annotations on", 4000)
+
+    # ------------------------------------------------------------------ session resume
+    def _prompt_interrupted_sessions(self) -> None:
+        """Offer resume/repair/ignore for sessions left in 'recording' state."""
+
+        if self._recorder is not None:
+            return
+        try:
+            interrupted = find_interrupted_sessions(self.output_dir)
+        except Exception:
+            log.exception("could not scan for interrupted sessions")
+            return
+        for session_dir in interrupted:
+            action = self._ask_interrupted_session_action(session_dir)
+            if action == "resume":
+                if self._resume_interrupted_session(session_dir):
+                    return
+            elif action == "repair":
+                self._repair_interrupted_session(session_dir)
+            # ignore => continue scanning remaining sessions
+
+    def _ask_interrupted_session_action(self, session_dir: Path) -> str:
+        chooser = getattr(self, "_interrupted_session_action_chooser", None)
+        if callable(chooser):
+            return str(chooser(session_dir))
+
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        box.setWindowTitle("Interrupted session detected")
+        box.setText(f"Session '{session_dir.name}' appears interrupted (status=recording).")
+        box.setInformativeText(
+            "Resume continues into a new chunk series in the same session. "
+            "Repair only reconciles existing chunks without appending."
+        )
+        resume_btn = box.addButton("Resume", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        repair_btn = box.addButton("Repair only", QtWidgets.QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Ignore", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(resume_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is resume_btn:
+            return "resume"
+        if clicked is repair_btn:
+            return "repair"
+        return "ignore"
+
+    def _repair_interrupted_session(self, session_dir: Path) -> bool:
+        try:
+            report = repair_session(session_dir)
+            self._sessions_dock.refresh()
+            self.statusBar().showMessage(
+                f"repaired {session_dir.name} (quarantined={len(report.quarantined)}, "
+                f"unlisted={len(report.unlisted)})",
+                6000,
+            )
+            return True
+        except Exception as exc:
+            log.exception("could not repair interrupted session: %s", session_dir)
+            self.statusBar().showMessage(f"repair failed: {exc}", 6000)
+            return False
+
+    def _resume_interrupted_session(self, session_dir: Path) -> bool:
+        if self._recorder is not None:
+            self.statusBar().showMessage("a recording is already active", 4000)
+            return False
+        self._close_playback()
+        try:
+            recorder = resume_recorder(
+                session_dir,
+                flush_interval_s=float(self.config.recorder.flush_interval_s),
+                max_ram_bytes=int(self.config.recorder.max_ram_bytes),
+            )
+        except Exception as exc:
+            log.exception("could not resume session: %s", session_dir)
+            self.statusBar().showMessage(f"resume failed: {exc}", 6000)
+            return False
+
+        self._recorder = recorder
+        self._reset_overflow_warning()
+        self.record_action.blockSignals(True)
+        self.record_action.setChecked(True)
+        self.record_action.blockSignals(False)
+        self._refresh_live_markers()
+        self._sessions_dock.refresh()
+        self.statusBar().showMessage(f"resumed recording: {session_dir}", 6000)
+        return True
 
     # ------------------------------------------------------------------ recording
     def _toggle_recording(self, checked: bool) -> None:

@@ -44,6 +44,14 @@ Keep a Changelog and the project uses semantic versioning.
   prefixed with a prominent `RAM overflow dropping samples` warning; the warning
   clears after drops remain stable, making sustained buffer exhaustion visible
   without opening the manifest.
+- Session resume (v0.2 robustness milestone): interrupted sessions left with
+  `status="recording"` are detected on GUI launch and the user is offered
+  **Resume** (continue into a new chunk series in the same session), **Repair
+  only**, or **Ignore**. Resume reconciles/repairs existing chunks, preserves
+  recorded data, and writes new `chunk-NNNNN.npy` files after the highest
+  existing chunk index on disk/manifest. Append-only manifest metadata records
+  `resumed_utc`, `resume_count`, and `resume_history` while `FORMAT_VERSION`
+  remains 1. Covered by `tests/test_session_resume.py` and repair resume test.
 - Per-session `notes` field (manifest-canonical, append-only optional top-level
   field; `FORMAT_VERSION` stays 1). The Sessions dock gains a **Notes…** action
   that edits the note via an atomic manifest rewrite, the note is exposed on

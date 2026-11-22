@@ -20,8 +20,15 @@ from typing import Any
 import numpy as np
 
 from myopyc.devices.model import SampleBatch
-from myopyc.recorder.manifest import MANIFEST_NAME, isoformat, new_manifest, utc_now, write_manifest
-from myopyc.recorder.markers import Marker
+from myopyc.recorder.manifest import (
+    MANIFEST_NAME,
+    isoformat,
+    new_manifest,
+    read_manifest,
+    utc_now,
+    write_manifest,
+)
+from myopyc.recorder.markers import Marker, markers_from_manifest
 from myopyc.streams.schema import STREAM_DTYPES, StreamKind
 
 log = logging.getLogger(__name__)
@@ -56,6 +63,8 @@ class SessionRecorder:
         max_ram_bytes: int = 64 * 1024 * 1024,
         session_name: str | None = None,
         markers: list[Marker] | None = None,
+        _resume_session_dir: Path | None = None,
+        _resume_manifest: dict[str, Any] | None = None,
     ) -> None:
         if not devices:
             raise ValueError("at least one device is required")
@@ -63,11 +72,18 @@ class SessionRecorder:
         self.devices = {key: dict(meta) for key, meta in devices.items()}
         self.flush_interval_s = max(0.05, float(flush_interval_s))
         self.max_ram_bytes = max(1, int(max_ram_bytes))
+        self._resuming = _resume_session_dir is not None
 
-        stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-        suffix = f"_{session_name}" if session_name else ""
-        self.session_id = f"{stamp}_{uuid.uuid4().hex[:6]}"
-        self.session_dir = self.output_dir / f"{self.session_id}{suffix}"
+        if self._resuming:
+            if _resume_manifest is None:
+                raise ValueError("resume manifest is required when resuming")
+            self.session_dir = Path(_resume_session_dir)
+            self.session_id = str(_resume_manifest.get("session_id") or self.session_dir.name)
+        else:
+            stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+            suffix = f"_{session_name}" if session_name else ""
+            self.session_id = f"{stamp}_{uuid.uuid4().hex[:6]}"
+            self.session_dir = self.output_dir / f"{self.session_id}{suffix}"
 
         stream_count = len(self.devices) * len(StreamKind)
         self._per_stream_cap = max(1, self.max_ram_bytes // stream_count)
@@ -92,13 +108,20 @@ class SessionRecorder:
         self._dropped: dict[tuple[str, StreamKind], int] = {key: 0 for key in self._buffers}
         self._gaps: list[dict[str, Any]] = []
 
-        self._manifest: dict[str, Any] = new_manifest(
-            self.session_id,
-            self.devices,
-            flush_interval_s=self.flush_interval_s,
-            max_ram_bytes=self.max_ram_bytes,
-        )
-        self._markers: list[Marker] = list(markers or [])
+        if self._resuming:
+            self._manifest = dict(_resume_manifest)
+            self._load_resume_state()
+            if markers:
+                self._markers.extend(markers)
+                self._manifest["markers"] = [m.as_dict() for m in self._markers]
+        else:
+            self._manifest = new_manifest(
+                self.session_id,
+                self.devices,
+                flush_interval_s=self.flush_interval_s,
+                max_ram_bytes=self.max_ram_bytes,
+            )
+            self._markers = list(markers or [])
 
     # ------------------------------------------------------------------ lifecycle
     @property
@@ -110,22 +133,31 @@ class SessionRecorder:
         return self.session_dir / MANIFEST_NAME
 
     def start(self) -> Path:
-        """Create the session directory and start the flush thread."""
+        """Create or reopen the session directory and start the flush thread."""
 
         with self._lock:
             if self._started:
                 raise RuntimeError("recorder already started")
-            self.session_dir.mkdir(parents=True, exist_ok=False)
+            self.session_dir.mkdir(parents=True, exist_ok=self._resuming)
             for key in self.devices:
                 for kind in StreamKind:
                     (self.session_dir / "devices" / key / kind.value).mkdir(
                         parents=True, exist_ok=True
                     )
+            if self._resuming:
+                self._manifest["status"] = "recording"
+                self._manifest["stopped_utc"] = None
+                now = isoformat(utc_now())
+                self._manifest["resumed_utc"] = now
+                self._manifest["resume_count"] = int(self._manifest.get("resume_count", 0)) + 1
+                self._manifest.setdefault("resume_history", [])
+                if isinstance(self._manifest["resume_history"], list):
+                    self._manifest["resume_history"].append({"resumed_utc": now})
             write_manifest(self.session_dir, self._manifest)
             self._started = True
             self._thread = threading.Thread(target=self._run, name="myopyc-recorder", daemon=True)
             self._thread.start()
-        log.info("recording to %s", self.session_dir)
+        log.info("%s to %s", "resuming recording" if self._resuming else "recording", self.session_dir)
         return self.session_dir
 
     def stop(self) -> Path:
@@ -207,6 +239,64 @@ class SessionRecorder:
             # annotations survive without a subsequent rewrite.
             with self._write_lock:
                 write_manifest(self.session_dir, self._manifest)
+
+    # ------------------------------------------------------------------ resume
+    def _load_resume_state(self) -> None:
+        """Seed counters/indices from an existing manifest for append-resume."""
+
+        manifest_devices = self._manifest.get("devices", {})
+        self._gaps = list(self._manifest.get("gaps", []))
+        self._markers = markers_from_manifest(self._manifest)
+        for key, meta in self.devices.items():
+            device_entry = manifest_devices.get(key)
+            if not isinstance(device_entry, dict):
+                device_entry = {
+                    "label": meta.get("label", key),
+                    "mac": meta.get("mac"),
+                    "name": meta.get("name", "Myo"),
+                    "firmware": meta.get("firmware"),
+                    "streams": {},
+                }
+                manifest_devices[key] = device_entry
+            device_entry.setdefault("label", meta.get("label", key))
+            device_entry.setdefault("mac", meta.get("mac"))
+            device_entry.setdefault("name", meta.get("name", "Myo"))
+            device_entry.setdefault("firmware", meta.get("firmware"))
+            streams = device_entry.setdefault("streams", {})
+            for kind in StreamKind:
+                skey = (key, kind)
+                stream_entry = streams.get(kind.value)
+                if not isinstance(stream_entry, dict):
+                    stream_entry = {"chunks": [], "samples": 0, "dropped_samples": 0}
+                    streams[kind.value] = stream_entry
+                chunks = list(stream_entry.get("chunks", []))
+                self._chunks[skey] = chunks
+                self._written[skey] = int(stream_entry.get("samples", 0))
+                self._dropped[skey] = int(stream_entry.get("dropped_samples", 0))
+                self._chunk_index[skey] = self._next_chunk_index(key, kind, chunks)
+        self._manifest["devices"] = manifest_devices
+
+    def _next_chunk_index(
+        self, device: str, kind: StreamKind, chunks: list[dict[str, Any]]
+    ) -> int:
+        """Compute next chunk index, never colliding with existing chunk files."""
+
+        indices: list[int] = []
+        for chunk in chunks:
+            file_name = Path(str(chunk.get("file", ""))).name
+            if file_name.startswith("chunk-") and file_name.endswith(".npy"):
+                try:
+                    indices.append(int(file_name[len("chunk-") : -len(".npy")]))
+                except ValueError:
+                    continue
+        stream_dir = self.session_dir / "devices" / device / kind.value
+        if stream_dir.is_dir():
+            for path in stream_dir.glob("chunk-*.npy"):
+                try:
+                    indices.append(int(path.stem.split("-", 1)[1]))
+                except (IndexError, ValueError):
+                    continue
+        return max(indices, default=-1) + 1
 
     # ------------------------------------------------------------------ internals
     def _run(self) -> None:
@@ -305,6 +395,101 @@ class SessionRecorder:
             "chunks_written": chunks,
             "gaps": gaps,
         }
+
+
+def _manifest_devices_for_resume(manifest: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    devices: dict[str, dict[str, Any]] = {}
+    for key, entry in manifest.get("devices", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        devices[str(key)] = {
+            "label": entry.get("label", key),
+            "mac": entry.get("mac"),
+            "name": entry.get("name", "Myo"),
+            "firmware": entry.get("firmware"),
+        }
+    return devices
+
+
+def find_interrupted_sessions(root: Path | str) -> list[Path]:
+    """Return sessions whose manifest status indicates an interrupted recording."""
+
+    root = Path(root).expanduser()
+    if not root.exists():
+        return []
+    interrupted: list[Path] = []
+    for path in sorted(root.iterdir()):
+        manifest_path = path / MANIFEST_NAME
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = read_manifest(path)
+        except Exception:
+            continue
+        if manifest.get("status") == "recording":
+            interrupted.append(path)
+    return sorted(interrupted, key=lambda p: p.name, reverse=True)
+
+
+def resume_recorder(
+    session_dir: Path | str,
+    *,
+    flush_interval_s: float | None = None,
+    max_ram_bytes: int | None = None,
+    markers: list[Marker] | None = None,
+) -> SessionRecorder:
+    """Resume an interrupted session into a new continuing chunk series.
+
+    Existing chunks/manifests are reconciled via :func:`repair_session` first so
+    resume never appends over an inconsistent mid-crash state. The recorder keeps
+    the same session directory and session id, but writes new chunk files whose
+    indices continue after the highest existing chunk on disk/manifest.
+    """
+
+    from myopyc.recorder.repair import repair_session
+
+    session_dir = Path(session_dir).expanduser()
+    report = repair_session(session_dir)
+    manifest = read_manifest(session_dir)
+    status = manifest.get("status")
+    if status not in {"repaired", "stopped"}:
+        raise ValueError(
+            f"session {session_dir.name} has status {status!r}; only repaired/stopped sessions can be resumed"
+        )
+
+    devices = _manifest_devices_for_resume(manifest)
+    if not devices:
+        raise ValueError(f"session {session_dir.name} has no devices to resume")
+
+    chunking = manifest.get("chunking", {}) if isinstance(manifest.get("chunking"), dict) else {}
+    flush = (
+        float(flush_interval_s)
+        if flush_interval_s is not None
+        else float(chunking.get("flush_interval_s", 2.0))
+    )
+    ram = (
+        int(max_ram_bytes)
+        if max_ram_bytes is not None
+        else int(chunking.get("max_ram_bytes", 64 * 1024 * 1024))
+    )
+
+    recorder = SessionRecorder(
+        session_dir.parent,
+        devices,
+        flush_interval_s=flush,
+        max_ram_bytes=ram,
+        markers=markers,
+        _resume_session_dir=session_dir,
+        _resume_manifest=manifest,
+    )
+    recorder.start()
+    log.info(
+        "resumed session %s after repair changed=%s quarantined=%d",
+        session_dir.name,
+        report.changed,
+        len(report.quarantined),
+    )
+    return recorder
 
 
 def open_recorder(
