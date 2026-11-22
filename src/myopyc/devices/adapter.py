@@ -36,6 +36,20 @@ _INSTALL_HINT = (
     "dl-myo is not installed. Install the hardware extra: pip install 'myopyc[hardware]'"
 )
 
+# Reconnect policy for dropped BLE links. Kept as module-level defaults so the
+# adapter's behavior is explicit, testable, and easy to tune in one place.
+RECONNECT_BASE_DELAY_S = 2.0
+RECONNECT_MAX_DELAY_S = 30.0
+RECONNECT_BACKOFF_FACTOR = 2.0
+
+
+def reconnect_delay_s(attempt: int) -> float:
+    """Backoff delay for a 1-based reconnect attempt, capped at the policy max."""
+
+    n = max(1, int(attempt))
+    delay = RECONNECT_BASE_DELAY_S * (RECONNECT_BACKOFF_FACTOR ** (n - 1))
+    return min(RECONNECT_MAX_DELAY_S, delay)
+
 
 def dl_myo_available() -> bool:
     try:
@@ -105,23 +119,28 @@ class DlMyoSource:
         asyncio.set_event_loop(loop)
         try:
             attempt = 0
-            while True:
+            while not self._stop_requested:
                 try:
-                    loop.run_until_complete(self._session())
-                    break  # clean stop from within _session
+                    streamed = loop.run_until_complete(self._session())
+                    if self._stop_requested or streamed:
+                        break
+                    # Session ended without streaming and without an exception.
+                    # Treat as a transient failure so we do not spin hot.
+                    raise RuntimeError("session ended before streaming")
                 except Exception as exc:
                     if self._stop_requested:
                         break
                     attempt += 1
-                    delay = min(30.0, 2.0 * attempt)
+                    delay = reconnect_delay_s(attempt)
                     log.warning(
-                        "Myo %s dropped (%s); reconnecting in %.0fs",
+                        "Myo %s dropped (%s); reconnecting in %.0fs (attempt %d)",
                         self.info.mac,
                         exc,
                         delay,
+                        attempt,
                     )
                     self._status(self.info.key, "reconnecting", str(exc))
-                    time.sleep(delay)
+                    self._sleep_before_reconnect(delay)
         finally:
             self._loop = None
             self._stop_event = None
@@ -130,7 +149,23 @@ class DlMyoSource:
             finally:
                 loop.close()
 
-    async def _session(self) -> None:
+    def _sleep_before_reconnect(self, delay_s: float) -> None:
+        """Wait before retrying, but wake promptly when stop is requested."""
+
+        deadline = time.monotonic() + max(0.0, delay_s)
+        while not self._stop_requested:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.25, remaining))
+
+    async def _session(self) -> bool:
+        """Run one connect/stream session.
+
+        Returns ``True`` when the stream reached the healthy streaming state at
+        least once. The reconnect loop uses this to distinguish "dropped after a
+        good session" from "never connected", while still retrying in both cases.
+        """
         from myo import Myo, MyoClient
         from myo.types import (
             AggregatedData,
@@ -228,6 +263,7 @@ class DlMyoSource:
             with contextlib.suppress(asyncio.CancelledError):
                 await battery_task
             self._status(self.info.key, "stopping", None)
+            return True
         finally:
             # Restore normal sleep behaviour before disconnecting.
             with contextlib.suppress(Exception):

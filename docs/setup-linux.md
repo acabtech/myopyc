@@ -81,7 +81,7 @@ The BLE adapter (`dl-myo`) runs on its own thread with an automatic reconnect
 loop. What happens when the link drops:
 
 1. The adapter logs the failure and reports the device as **reconnecting**.
-2. It retries with exponential backoff — 2 s, 4 s, 6 s, … capped at 30 s —
+2. It retries with exponential backoff — 2 s, 4 s, 8 s, 16 s, capped at 30 s —
    until the link is re-established or the stream is stopped by the user
    (the retry loop only exits early on a stop request).
 3. During a reconnect no samples arrive; samples from before the drop are

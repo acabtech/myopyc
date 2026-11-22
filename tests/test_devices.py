@@ -284,6 +284,84 @@ def test_merge_saved_bindings_adds_remembered_and_dedupes() -> None:
     assert merged[0].remembered is False
 
 
+def test_reconnect_delay_policy_is_capped_exponential() -> None:
+    assert adapter_mod.reconnect_delay_s(1) == 2.0
+    assert adapter_mod.reconnect_delay_s(2) == 4.0
+    assert adapter_mod.reconnect_delay_s(3) == 8.0
+    assert adapter_mod.reconnect_delay_s(4) == 16.0
+    assert adapter_mod.reconnect_delay_s(5) == 30.0
+    assert adapter_mod.reconnect_delay_s(99) == 30.0
+
+
+def test_sleep_before_reconnect_wakes_on_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = DeviceInfo(key="real", label="Real", mac="D2:3B:85:94:32:8E", name="Myo")
+    source = adapter_mod.DlMyoSource.__new__(adapter_mod.DlMyoSource)
+    source.info = info
+    source._stop_requested = False
+
+    sleeps: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        source._stop_requested = True
+
+    monkeypatch.setattr(adapter_mod.time, "sleep", fake_sleep)
+    monkeypatch.setattr(adapter_mod.time, "monotonic", lambda: 0.0)
+
+    source._sleep_before_reconnect(30.0)
+    assert sleeps == [0.25]
+
+
+def test_thread_main_retries_and_reports_reconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = DeviceInfo(key="real", label="Real", mac="D2:3B:85:94:32:8E", name="Myo")
+    statuses: list[tuple[str, str, str | None]] = []
+    source = adapter_mod.DlMyoSource.__new__(adapter_mod.DlMyoSource)
+    source.info = info
+    source._status = lambda key, state, detail: statuses.append((key, state, detail))
+    source._stop_requested = False
+    source._loop = None
+    source._stop_event = None
+
+    calls = {"n": 0}
+    delays: list[float] = []
+
+    class FakeLoop:
+        def run_until_complete(self, coro):
+            # Ignore shutdown_asyncgens()'s noop coroutine in the finally block.
+            name = getattr(coro, "cr_code", None)
+            if getattr(name, "co_name", "") == "_noop":
+                coro.close()
+                return None
+            calls["n"] += 1
+            coro.close()
+            if calls["n"] == 1:
+                raise RuntimeError("link dropped")
+            return True
+
+        def is_running(self) -> bool:
+            return False
+
+        def shutdown_asyncgens(self):
+            async def _noop():
+                return None
+
+            return _noop()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(adapter_mod.asyncio, "new_event_loop", lambda: FakeLoop())
+    monkeypatch.setattr(adapter_mod.asyncio, "set_event_loop", lambda _loop: None)
+    monkeypatch.setattr(adapter_mod, "reconnect_delay_s", lambda attempt: 2.0 if attempt == 1 else 4.0)
+    monkeypatch.setattr(source, "_sleep_before_reconnect", lambda delay: delays.append(delay))
+
+    source._thread_main()
+
+    assert calls["n"] == 2
+    assert delays == [2.0]
+    assert ("real", "reconnecting", "link dropped") in statuses
+
+
 # --------------------------------------------------------------------- events
 # Pose -> EVENT type decoding in DlMyoSource. The classifier notification only
 # carries a pose; the orientation payload is the last IMU quaternion.
@@ -322,7 +400,7 @@ def _real_classifier_enum(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_types = _types.ModuleType("myo.types")
     fake_types.ClassifierEventType = _FakeEventType  # type: ignore[attr-defined]
     fake_myos = _types.ModuleType("myo")
-    setattr(fake_myos, "types", fake_types)  # module attr not in mypy's stubs
+    fake_myos.types = fake_types  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "myo", fake_myos)
     monkeypatch.setitem(sys.modules, "myo.types", fake_types)
 

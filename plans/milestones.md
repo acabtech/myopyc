@@ -150,7 +150,7 @@ No trimming to 0.2.1/0.3.
 
 ### Robustness
 
-- [ ] Auto-reconnect policy for dropped BLE links with user-visible state
+- [x] Auto-reconnect policy for dropped BLE links with user-visible state (done 2026-11-22: [`DlMyoSource`](../src/myopyc/devices/adapter.py) now has an explicit exponential reconnect backoff policy 2/4/8/16s capped at 30s, reports `reconnecting` with attempt/detail, wakes reconnect waits promptly on stop, and is covered by headless device tests; user-visible reconnect state/warning was already surfaced in UI/health/docs)
 - [ ] Session resume: interrupted session detected on next launch, offers to continue into a NEW chunk series (distinct from v0.1's repair, which only reconciles existing chunks, never appends)
 - [x] RAM budget warning in UI when sustained overflow/drops occur (done 2026-11-22: status-bar warns on sustained dropped-sample growth during recording and clears after stable ticks; offscreen Qt tests cover appear/clear/no-recording cases)
 

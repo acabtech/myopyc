@@ -7,6 +7,13 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Auto-reconnect policy hardening (v0.2 robustness milestone): the `dl-myo`
+  BLE adapter now uses an explicit exponential reconnect backoff policy
+  (2 s, 4 s, 8 s, 16 s, capped at 30 s), reports `reconnecting` with the
+  attempt/detail, and wakes reconnect waits promptly on stop requests. The
+  policy is covered by headless device tests and documented in
+  [`docs/setup-linux.md`](docs/setup-linux.md).
+
 - User-guide workflow documentation and GitHub Pages docs site (v0.2 docs
   milestone): added [`docs/user-guide.md`](docs/user-guide.md) covering
   implemented marker injection/overlay, gesture annotations, derived
