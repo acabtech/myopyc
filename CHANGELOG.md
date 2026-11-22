@@ -7,6 +7,7 @@ Keep a Changelog and the project uses semantic versioning.
 
 ### Added
 
+- Closed stale v0.2 EVENT dtype milestone item after contract verification: [`EVENT_DTYPE`](src/myopyc/streams/schema.py) already encodes host-monotonic `t_ns`, per-stream `seq`, pose `type`, and packed orientation payload `ox/oy/oz/ow`, with coverage in [`tests/test_schema.py`](tests/test_schema.py) and EVENT round-trip tests in [`tests/test_recorder.py`](tests/test_recorder.py); [`plans/milestones.md`](plans/milestones.md) updated.
 - Data-format spec audit/closure for v0.2 additive fields: [`docs/data-format.md`](docs/data-format.md)
   now explicitly documents optional top-level `notes` and `markers`, the optional
   `event` stream kind, and the append-only evolution contract with known v0.2
