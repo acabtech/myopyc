@@ -202,11 +202,25 @@ class SessionRecorder:
                 )
 
         with self._lock:
-            self._stopped = True
-            self._stopping = False
+            prev_status = self._manifest.get("status")
+            prev_stopped_utc = self._manifest.get("stopped_utc")
             self._manifest["status"] = "stopped"
             self._manifest["stopped_utc"] = isoformat(utc_now())
-            write_manifest(self.session_dir, self._manifest)
+
+        try:
+            with self._write_lock:
+                write_manifest(self.session_dir, self._manifest)
+        except Exception:
+            with self._lock:
+                self._manifest["status"] = prev_status
+                self._manifest["stopped_utc"] = prev_stopped_utc
+                self._stopping = True
+                self._stopped = False
+            raise
+
+        with self._lock:
+            self._stopped = True
+            self._stopping = False
         log.info("recording finalised: %s", self.session_dir)
         return self.session_dir
 
