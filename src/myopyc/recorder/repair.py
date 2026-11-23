@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -158,7 +159,11 @@ def repair_session(session_dir: Path | str, *, dry_run: bool = False) -> RepairR
                         stream_key, 0
                     ) + int(chunk.get("samples", 0))
                     continue
-                dtype = STREAM_DTYPES.get(StreamKind(stream_name))
+                try:
+                    kind = StreamKind(stream_name)
+                except ValueError:
+                    kind = None
+                dtype = STREAM_DTYPES.get(kind) if kind is not None else None
                 if dtype is not None and not _loadable(path, dtype):
                     report.mismatched.append(rel)
                     report.dropped_samples[stream_key] = report.dropped_samples.get(
@@ -242,7 +247,7 @@ def _quarantine(session_dir: Path, path: Path, report: RepairReport) -> None:
 def _backup_manifest(session_dir: Path) -> None:
     manifest = session_dir / MANIFEST_NAME
     if manifest.is_file():
-        os.replace(manifest, session_dir / "manifest.json.bak")
+        shutil.copy2(manifest, session_dir / "manifest.json.bak")
 
 
 def _manifest_backed_up(session_dir: Path) -> bool:
