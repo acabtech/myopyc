@@ -75,10 +75,31 @@ def test_overflow_drops_oldest_and_records_gap(tmp_path) -> None:
 
     manifest = read_manifest(recorder.session_dir)
     emg = manifest["devices"]["left"]["streams"]["emg"]
-    assert emg["samples"] == 4  # only the newest batch survived
-    assert emg["dropped_samples"] == 36
-    assert len(manifest["gaps"]) >= 1
-    assert manifest["gaps"][0]["reason"] == "ram-buffer-overflow"
+    assert emg["samples"] == 0
+    assert emg["dropped_samples"] == 40
+    assert len(manifest["gaps"]) == 10
+    assert all(gap["reason"] == "ram-buffer-overflow" for gap in manifest["gaps"])
+
+
+def test_overflow_drops_single_buffer_exceeding_cap(tmp_path) -> None:
+    # 2 devices * 3 streams = 6 streams; 300 bytes total => 50 bytes/stream.
+    # A 4-sample EMG batch is 96 bytes, so one batch alone exceeds the cap.
+    recorder = _recorder(tmp_path, max_ram_bytes=300)
+    recorder.add(make_emg("left", count=4, start_seq=0, t0=1_000_000_000))
+    recorder.stop()
+
+    manifest = read_manifest(recorder.session_dir)
+    emg = manifest["devices"]["left"]["streams"]["emg"]
+    assert emg["samples"] == 0
+    assert emg["dropped_samples"] == 4
+    assert len(manifest["gaps"]) == 1
+    gap = manifest["gaps"][0]
+    assert gap["device"] == "left"
+    assert gap["stream"] == "emg"
+    assert gap["reason"] == "ram-buffer-overflow"
+    assert gap["samples"] == 4
+    assert gap["t_start_ns"] == 1_000_000_000
+    assert gap["t_end_ns"] == 1_000_000_000 + 3 * 5_000_000
 
 
 def test_add_before_start_is_ignored(tmp_path) -> None:

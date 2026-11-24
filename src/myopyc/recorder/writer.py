@@ -245,7 +245,9 @@ class SessionRecorder:
             self._buffer_bytes[key] += size
             self._received[key] += int(array.size)
 
-            while self._buffer_bytes[key] > self._per_stream_cap and len(self._buffers[key]) > 1:
+            while self._buffer_bytes[key] > self._per_stream_cap and self._buffers[key]:
+                # Drop oldest buffered arrays, including a lone array that still
+                # exceeds the per-stream cap, so buffered bytes stay bounded.
                 dropped = self._buffers[key].pop(0)
                 self._buffer_bytes[key] -= int(dropped.nbytes)
                 self._dropped[key] += int(dropped.size)
