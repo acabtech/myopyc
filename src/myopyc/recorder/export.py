@@ -185,9 +185,28 @@ def verify_session_zip(archive: Path | str) -> ZipIntegrityReport:
 
     archive = Path(archive)
     report = ZipIntegrityReport(archive=archive, ok=False)
-    with zipfile.ZipFile(archive) as zf:
-        integrity = zf.read(_INTEGRITY_NAME)
-        listed: dict[str, str] = json.loads(integrity).get("files", {})
+    try:
+        zf = zipfile.ZipFile(archive)
+    except (zipfile.BadZipFile, OSError):
+        report.corrupted.append(_INTEGRITY_NAME)
+        return report
+
+    with zf:
+        try:
+            integrity = zf.read(_INTEGRITY_NAME)
+        except KeyError:
+            report.missing.append(_INTEGRITY_NAME)
+            return report
+        try:
+            payload = json.loads(integrity)
+        except (json.JSONDecodeError, UnicodeDecodeError, zipfile.BadZipFile, OSError):
+            report.corrupted.append(_INTEGRITY_NAME)
+            return report
+        listed_raw = payload.get("files", {}) if isinstance(payload, dict) else {}
+        if not isinstance(listed_raw, dict):
+            report.corrupted.append(_INTEGRITY_NAME)
+            return report
+        listed: dict[str, str] = listed_raw
         seen: set[str] = set()
         for info in zf.infolist():
             if info.is_dir() or info.filename == _INTEGRITY_NAME:
@@ -197,7 +216,11 @@ def verify_session_zip(archive: Path | str) -> ZipIntegrityReport:
                 report.unexpected.append(info.filename)
                 continue
             report.checked += 1
-            digest = hashlib.sha256(zf.read(info)).hexdigest()
+            try:
+                digest = hashlib.sha256(zf.read(info)).hexdigest()
+            except (zipfile.BadZipFile, OSError, RuntimeError):
+                report.corrupted.append(info.filename)
+                continue
             if digest != listed[info.filename]:
                 report.corrupted.append(info.filename)
         report.missing = sorted(set(listed) - seen)
