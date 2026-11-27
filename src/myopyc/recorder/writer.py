@@ -9,7 +9,9 @@ recorded in the manifest.
 
 from __future__ import annotations
 
+import copy
 import logging
+import os
 import threading
 import time
 import uuid
@@ -23,6 +25,7 @@ import numpy as np
 from myopyc.devices.model import SampleBatch
 from myopyc.recorder.manifest import (
     MANIFEST_NAME,
+    fsync_directory,
     isoformat,
     new_manifest,
     read_manifest,
@@ -115,6 +118,14 @@ class SessionRecorder:
             assert _resume_manifest is not None
             self._manifest = dict(_resume_manifest)
             self._load_resume_state()
+            # Resume overrides (or inherited values) are the effective runtime
+            # settings, so the manifest must not keep advertising stale ones.
+            chunking = self._manifest.get("chunking")
+            if not isinstance(chunking, dict):
+                chunking = {}
+                self._manifest["chunking"] = chunking
+            chunking["flush_interval_s"] = self.flush_interval_s
+            chunking["max_ram_bytes"] = self.max_ram_bytes
             if markers:
                 self._markers.extend(markers)
                 self._manifest["markers"] = [m.as_dict() for m in self._markers]
@@ -157,8 +168,18 @@ class SessionRecorder:
                 self._manifest.setdefault("resume_history", [])
                 if isinstance(self._manifest["resume_history"], list):
                     self._manifest["resume_history"].append({"resumed_utc": now})
-            write_manifest(self.session_dir, self._manifest)
             self._started = True
+            snapshot = self._manifest_snapshot()
+
+        try:
+            # Manifest I/O never happens while add() needs the ingestion lock.
+            write_manifest(self.session_dir, snapshot)
+        except Exception:
+            with self._lock:
+                self._started = False
+            raise
+
+        with self._lock:
             self._thread = threading.Thread(target=self._run, name="myopyc-recorder", daemon=True)
             self._thread.start()
         log.info(
@@ -206,10 +227,11 @@ class SessionRecorder:
             prev_stopped_utc = self._manifest.get("stopped_utc")
             self._manifest["status"] = "stopped"
             self._manifest["stopped_utc"] = isoformat(utc_now())
+            snapshot = self._manifest_snapshot()
 
         try:
             with self._write_lock:
-                write_manifest(self.session_dir, self._manifest)
+                write_manifest(self.session_dir, snapshot)
         except Exception:
             with self._lock:
                 self._manifest["status"] = prev_status
@@ -245,23 +267,7 @@ class SessionRecorder:
             self._buffer_bytes[key] += size
             self._received[key] += int(array.size)
 
-            while self._buffer_bytes[key] > self._per_stream_cap and self._buffers[key]:
-                # Drop oldest buffered arrays, including a lone array that still
-                # exceeds the per-stream cap, so buffered bytes stay bounded.
-                dropped = self._buffers[key].pop(0)
-                self._buffer_bytes[key] -= int(dropped.nbytes)
-                self._dropped[key] += int(dropped.size)
-                self._gaps.append(
-                    {
-                        "device": batch.device,
-                        "stream": batch.kind.value,
-                        "reason": "ram-buffer-overflow",
-                        "t_start_ns": int(dropped["t_ns"][0]),
-                        "t_end_ns": int(dropped["t_ns"][-1]),
-                        "samples": int(dropped.size),
-                        "recorded_utc": isoformat(utc_now()),
-                    }
-                )
+            self._enforce_ram_cap(key)
 
     # ------------------------------------------------------------------ markers
     def add_marker(self, marker: Marker) -> None:
@@ -276,11 +282,12 @@ class SessionRecorder:
         with self._lock:
             self._markers.append(marker)
             self._manifest["markers"] = [m.as_dict() for m in self._markers]
+            snapshot = self._manifest_snapshot()
         if not self.recording and self._started:
             # Not running (pre-start or post-stop): flush immediately so late
             # annotations survive without a subsequent rewrite.
             with self._write_lock:
-                write_manifest(self.session_dir, self._manifest)
+                write_manifest(self.session_dir, snapshot)
 
     # ------------------------------------------------------------------ resume
     def _load_resume_state(self) -> None:
@@ -350,6 +357,35 @@ class SessionRecorder:
         except Exception:  # pragma: no cover
             log.exception("final chunk flush failed")
 
+    def _manifest_snapshot(self) -> dict[str, Any]:
+        """Copy the manifest while ``_lock`` is held; callers write the copy."""
+
+        return copy.deepcopy(self._manifest)
+
+    def _enforce_ram_cap(self, key: tuple[str, StreamKind]) -> None:
+        """Drop oldest buffers until the stream is within its RAM budget.
+
+        The caller must hold ``_lock``. A lone buffer that still exceeds the cap
+        is dropped too, so no requeue path can bypass the bounded-RAM contract.
+        """
+
+        device, kind = key
+        while self._buffer_bytes[key] > self._per_stream_cap and self._buffers[key]:
+            dropped = self._buffers[key].pop(0)
+            self._buffer_bytes[key] -= int(dropped.nbytes)
+            self._dropped[key] += int(dropped.size)
+            self._gaps.append(
+                {
+                    "device": device,
+                    "stream": kind.value,
+                    "reason": "ram-buffer-overflow",
+                    "t_start_ns": int(dropped["t_ns"][0]),
+                    "t_end_ns": int(dropped["t_ns"][-1]),
+                    "samples": int(dropped.size),
+                    "recorded_utc": isoformat(utc_now()),
+                }
+            )
+
     def _flush_all(self) -> None:
         with self._write_lock:
             with self._lock:
@@ -362,8 +398,12 @@ class SessionRecorder:
 
                 if not pending:
                     self._refresh_manifest_counters()
-                    write_manifest(self.session_dir, self._manifest)
-                    return
+                snapshot = self._manifest_snapshot()
+
+            if not pending:
+                # Disk I/O happens outside the ingestion lock, even on idle flushes.
+                write_manifest(self.session_dir, snapshot)
+                return
 
             new_chunks: list[tuple[tuple[str, StreamKind], dict[str, Any]]] = []
             written: list[tuple[tuple[str, StreamKind], list[np.ndarray[Any, Any]]]] = []
@@ -375,6 +415,7 @@ class SessionRecorder:
                     with self._lock:
                         self._buffers[key][:0] = arrays
                         self._buffer_bytes[key] += sum(int(a.nbytes) for a in arrays)
+                        self._enforce_ram_cap(key)
                     continue
                 new_chunks.append((key, chunk_meta))
                 written.append((key, arrays))
@@ -385,7 +426,8 @@ class SessionRecorder:
                     self._chunk_index[key] += 1
                     self._written[key] += int(chunk_meta["samples"])
                 self._refresh_manifest_counters()
-                write_manifest(self.session_dir, self._manifest)
+                snapshot = self._manifest_snapshot()
+            write_manifest(self.session_dir, snapshot)
 
             if written:
                 total = sum(int(a.size) for _, arrays in written for a in arrays)
@@ -401,6 +443,11 @@ class SessionRecorder:
         data = np.concatenate(arrays) if len(arrays) > 1 else arrays[0]
         try:
             np.save(path, data, allow_pickle=False)
+            # Make the chunk bytes (and its directory entry) durable before the
+            # manifest is committed; otherwise a crash can reference a phantom.
+            with path.open("rb") as handle:
+                os.fsync(handle.fileno())
+            fsync_directory(path.parent)
             size = int(path.stat().st_size)
         except Exception:
             # Never leave a partial/orphan chunk behind when the write path fails.

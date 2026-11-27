@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -80,13 +81,36 @@ def new_manifest(
     }
 
 
+def fsync_directory(directory: Path) -> None:
+    """Flush a directory's entries to disk; ignore platforms that disallow it."""
+
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        fd = os.open(directory, flags)
+    except OSError:
+        return
+    try:
+        with suppress(OSError):
+            os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def write_manifest(session_dir: Path, manifest: Mapping[str, Any]) -> Path:
-    """Atomically write ``manifest.json`` inside ``session_dir``."""
+    """Atomically write ``manifest.json`` inside ``session_dir``.
+
+    The temporary file and its renaming directory are fsynced so a crash cannot
+    leave a durable manifest that points at non-durable chunks.
+    """
 
     target = Path(session_dir) / MANIFEST_NAME
     tmp = target.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(manifest, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(manifest, indent=2, sort_keys=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(tmp, target)
+    fsync_directory(target.parent)
     return target
 
 
