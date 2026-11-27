@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 
 from myopyc.recorder.manifest import read_manifest
 from myopyc.recorder.markers import Marker, markers_from_manifest
-from myopyc.recorder.repair import RepairReport, repair_session
+from myopyc.recorder.repair import RepairReport, contained_chunk_path, repair_session
 from myopyc.streams.schema import STREAM_DTYPES, StreamKind
 
 
@@ -97,7 +97,10 @@ class SessionReader:
     def iter_chunks(self, device: str, kind: StreamKind | str) -> Iterator[NDArray[Any]]:
         kind = StreamKind(kind)
         for chunk in self.chunks(device, kind):
-            path = self.directory / chunk["file"]
+            rel = str(chunk.get("file", ""))
+            path = contained_chunk_path(self.directory, rel)
+            if path is None:
+                raise ValueError(f"chunk path {rel!r} is outside session {self.directory}")
             yield np.load(path, allow_pickle=False)
 
     def load_stream(self, device: str, kind: StreamKind | str) -> NDArray[Any]:

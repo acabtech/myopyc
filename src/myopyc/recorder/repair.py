@@ -106,6 +106,24 @@ def _loadable(path: Path, expected_dtype: np.dtype[Any] | None) -> bool:
     return expected_dtype is None or array.dtype == expected_dtype
 
 
+def contained_chunk_path(session_dir: Path | str, rel: str) -> Path | None:
+    """Resolve a manifest chunk path, or return None if it is not contained.
+
+    Absolute paths, ``..`` escapes and symlinks leaving the session directory are
+    untrusted: neither repair nor readers may follow them.
+    """
+
+    if not rel or Path(rel).is_absolute():
+        return None
+    root = Path(session_dir).resolve()
+    candidate = (root / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
 def repair_session(session_dir: Path | str, *, dry_run: bool = False) -> RepairReport:
     """Reconcile on-disk chunks with ``manifest.json`` for a crashed session.
 
@@ -152,8 +170,15 @@ def repair_session(session_dir: Path | str, *, dry_run: bool = False) -> RepairR
             survivors: list[dict[str, Any]] = []
             for chunk in stream.get("chunks", []):
                 rel = str(chunk.get("file", ""))
-                path = session_dir / rel
-                if not rel or not path.is_file():
+                path = contained_chunk_path(session_dir, rel)
+                if path is None and rel:
+                    # Untrusted path: unlist without reading or quarantining it.
+                    report.mismatched.append(rel)
+                    report.dropped_samples[stream_key] = report.dropped_samples.get(
+                        stream_key, 0
+                    ) + int(chunk.get("samples", 0))
+                    continue
+                if path is None or not path.is_file():
                     report.unlisted.append(rel or "<empty path>")
                     report.dropped_samples[stream_key] = report.dropped_samples.get(
                         stream_key, 0
@@ -164,7 +189,9 @@ def repair_session(session_dir: Path | str, *, dry_run: bool = False) -> RepairR
                 except ValueError:
                     kind = None
                 dtype = STREAM_DTYPES.get(kind) if kind is not None else None
-                if dtype is not None and not _loadable(path, dtype):
+                # Unknown stream kinds have no known dtype but their chunks still
+                # have to be readable; _loadable(path, None) checks exactly that.
+                if not _loadable(path, dtype):
                     report.mismatched.append(rel)
                     report.dropped_samples[stream_key] = report.dropped_samples.get(
                         stream_key, 0
@@ -231,7 +258,11 @@ def needs_repair(session_dir: Path | str) -> bool:
 
 
 def _quarantine(session_dir: Path, path: Path, report: RepairReport) -> None:
-    rel = path.relative_to(session_dir).as_posix()
+    try:
+        rel = path.resolve().relative_to(session_dir.resolve()).as_posix()
+    except ValueError:
+        log.warning("refusing to quarantine path outside session: %s", path)
+        return
     target = session_dir / QUARANTINE_DIR / Path(rel)
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
